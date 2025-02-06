@@ -1,0 +1,2 @@
+data/lcmodel/** filter=lfs diff=lfs merge=lfs -text
+code/lcmodel/**/* filter=lfs diff=lfs merge=lfs -text
