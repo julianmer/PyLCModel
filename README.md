@@ -10,7 +10,7 @@
 - **Automated Control Files:** Dynamically generates and adjusts LCModel control files to suit your data.
 - **Multiprocessing Support:** Leverage multiple cores to accelerate batch processing.
 - **Data Conversion:** Seamlessly converts to .raw for execution. (Coming soon: conversion to .basis)
-- **Robust Output Parsing:** Extracts metabolite concentrations and fit uncertainties directly from LCModel output.
+- **Robust Output Parsing:** Extracts metabolite concentrations and CRLBs from LCModel output.
 
 ---
 
