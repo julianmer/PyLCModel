@@ -66,8 +66,9 @@ class FrameworkLCModel():
                 if platform.system() == 'Darwin':
                     raise NotImplementedError('LCModel binaries for MacOS are not provided!')
                 elif platform.system() == 'Linux':
-                    self.path2exec = (f'./{os.path.dirname(os.path.realpath(__file__))}'
+                    self.path2exec = (f'{os.path.dirname(os.path.realpath(__file__))}'
                                       f'/lcmodel/executables/linux/lcmodel')
+                    os.chmod(self.path2exec, 0o755)  # make executable
         else: self.path2exec = path2exec
 
         # ignore metabolites
