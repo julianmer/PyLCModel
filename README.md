@@ -1,5 +1,7 @@
 # PyLCModel
 
+[![PyPI version](https://badge.fury.io/py/lcmodel-wrapper.svg)](https://badge.fury.io/py/lcmodel-wrapper)
+
 **PyLCModel** is a Python wrapper designed to streamline the use of LCModel for least-squares spectral fitting in MRS. It takes the complexity out of setting up LCModel by automating control file generation, handling data conversions, and managing execution (with support for both single and multi-core processing).
 
 ---
