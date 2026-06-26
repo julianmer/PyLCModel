@@ -1,0 +1,34 @@
+PyLCModel (lcmodel_wrapper)
+Copyright (c) 2024 Julian P. Merkofer and contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+------------------------------------------------------------------------------
+Third-party components
+------------------------------------------------------------------------------
+
+LCModel
+  LCModel is NOT part of this project's copyright. It is a separate program by
+  Dr. Stephen Provencher, distributed under the BSD 3-Clause License
+  (Copyright (c) 1992-2021, Stephen Provencher). See LICENSE.lcmodel for the
+  full text. This wrapper can download, build, or run the LCModel executable,
+  but does not claim any rights over it.
+  Home page: https://s-provencher.com/lcmodel.shtml
+
+LCModel compiled binaries
+  Pre-compiled LCModel binaries are obtained on demand from the community
+  collection at https://github.com/schorschinho/LCModel (maintained by
+  Georg Oeltzschner et al.). Individual builds were contributed by:
+    - macOS Catalina (Intel)   - Georg Oeltzschner
+    - macOS Monterey (M1)      - Bethany A. Stennett
+    - macOS Sequoia (M4)       - Julian P. Merkofer
+    - Windows 10 (x86_64)      - Georg Oeltzschner
+    - Linux (x86_64)           - Will Foran
+  The BSD 3-Clause LCModel license (LICENSE.lcmodel) applies to these binaries.
+
+Other referenced tools (not bundled)
+  - Augmentrum (https://github.com/julianmer/Augmentrum) - NIfTI-MRS augmentation
+  - MRS-Basis-Set-Conversion-Toolbox
+    (https://github.com/igweckay/MRS-Basis-Set-Conversion-Toolbox) - basis set
+    conversion reference
+  - Osprey (https://github.com/schorschinho/osprey) - control/basis tooling
