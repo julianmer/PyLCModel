@@ -4,7 +4,7 @@
   <p style="margin-top: 0px;"><em>A lightweight Python wrapper for LCModel spectral fitting in MR spectroscopy</em></p>
 
   [![PyPI version](https://badge.fury.io/py/lcmodel-wrapper.svg)](https://pypi.org/project/lcmodel-wrapper/)
-  [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
+  [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
   [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 </div>
 
@@ -29,10 +29,6 @@
 pip install lcmodel-wrapper
 ```
 
-NIfTI-MRS support is an optional extra:
-```bash
-pip install "lcmodel-wrapper[nifti]"
-```
 
 ### From Source
 ```bash
@@ -40,8 +36,6 @@ git clone https://github.com/julianmer/PyLCModel.git
 cd PyLCModel
 pip install -e .
 ```
-
-Core dependencies are intentionally minimal (`numpy`, `scipy`). `nibabel` is only needed for NIfTI-MRS.
 
 ---
 
@@ -100,7 +94,7 @@ lcmodel = PyLCModel(
 from lcmodel_wrapper import convert_to_basis
 convert_to_basis("/path/to/jmrui_folder", out_path="out.basis")
 ```
-> Basis conversion is **experimental** and not validated. For a dedicated, more complete tool (including MATLAB v7.3 and prior formats), see the [MRS Basis Set Conversion Toolbox](https://github.com/igweckay/MRS-Basis-Set-Conversion-Toolbox).
+> Basis conversion is **experimental** and not validated. For a dedicated, more complete tool, see the [MRS Basis Set Conversion Toolbox](https://github.com/igweckay/MRS-Basis-Set-Conversion-Toolbox).
 
 ---
 

@@ -7,15 +7,16 @@
 # Created: 26/06/26                                                                                #
 #                                                                                                  #
 # Purpose: Flexible input handling for PyLCModel. Accepts NumPy arrays (complex FIDs, or           #
-#          real/imag stacked spectra) in the time or frequency domain, NIfTI-MRS files via          #
-#          nibabel, jMRUI text files and LCModel ".RAW" files. Plus helpers to write/read the        #
-#          LCModel ".RAW" format used to feed the executable.                                      #
+#          real/imag stacked spectra) in the time or frequency domain, NIfTI-MRS files (read        #
+#          via the "nifti-mrs" package when available, falling back to nibabel), jMRUI text        #
+#          files and LCModel ".RAW" files. Plus helpers to write/read the LCModel ".RAW"             #
+#          format used to feed the executable.                                                     #
 #                                                                                                  #
 ####################################################################################################
 
 import os
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -32,9 +33,9 @@ class Signals:
     central_freq: Optional[float] = None  # MHz
 
 
-#*****************************#
-#   numpy shape normalization #
-#*****************************#
+#*******************************#
+#   numpy shape normalization   #
+#*******************************#
 def _normalize_array(arr: np.ndarray) -> np.ndarray:
     """Return a complex array of shape (batch, n_points) from a variety of layouts."""
     arr = np.asarray(arr)
@@ -63,22 +64,70 @@ def _normalize_array(arr: np.ndarray) -> np.ndarray:
     raise ValueError(f"Unsupported array shape for MRS data: {arr.shape}")
 
 
-#********************#
-#   NIfTI-MRS reader #
-#********************#
-def read_nifti_mrs(path: str) -> Signals:
-    """Read a NIfTI-MRS file into time-domain FIDs using nibabel.
+#**********************#
+#   NIfTI-MRS reader   #
+#**********************#
+def read_nifti_mrs(path: Union[str, Sequence[str]]) -> Signals:
+    """Read one or more NIfTI-MRS files into time-domain FIDs.
+
+    "path" may be a single file path or a list/tuple of paths. When a list is
+    given, every file is read and the FIDs are stacked along the batch axis
+    (all files must share the same number of points; "dwell" and "central_freq"
+    are taken from the first file).
+
+    Reading prefers the dedicated "nifti-mrs" package (correct dwell-time unit
+    handling and the NIfTI-MRS -> FSL conjugation convention). If it is not
+    installed, it falls back to parsing the file directly with "nibabel".
+    """
+    if isinstance(path, (list, tuple)):
+        if len(path) == 0:
+            raise ValueError("read_nifti_mrs received an empty list of paths.")
+        sigs = [_read_single_nifti_mrs(p) for p in path]
+        n_points = sigs[0].fids.shape[-1]
+        for p, s in zip(path, sigs):
+            if s.fids.shape[-1] != n_points:
+                raise ValueError(
+                    f"NIfTI-MRS files have mismatched point counts: "
+                    f"{n_points} vs {s.fids.shape[-1]} ({p})."
+                )
+        fids = np.concatenate([s.fids for s in sigs], axis=0)
+        return Signals(fids=fids, dwell=sigs[0].dwell, central_freq=sigs[0].central_freq)
+    return _read_single_nifti_mrs(path)
+
+
+def _read_single_nifti_mrs(path: str) -> Signals:
+    """Read a single NIfTI-MRS file into a Signals object."""
+    try:
+        from nifti_mrs.nifti_mrs import NIFTI_MRS
+    except Exception:
+        return _read_nifti_mrs_nibabel(path)
+
+    nmrs = NIFTI_MRS(path)
+    data = np.asarray(nmrs[:])                 # complex, spectral axis at index 3
+    if not np.iscomplexobj(data):
+        data = data.astype(np.complex64)
+
+    n_points = data.shape[3]
+    moved = np.moveaxis(data, 3, -1)           # spectral axis -> last
+    fids = moved.reshape(-1, n_points)
+
+    dwell = float(nmrs.dwelltime) if nmrs.dwelltime is not None else None
+    central_freq = None
+    sf = nmrs.spectrometer_frequency
+    if sf is not None and len(sf) > 0:
+        central_freq = float(sf[0])
+    return Signals(fids=fids, dwell=dwell, central_freq=central_freq)
+
+
+def _read_nifti_mrs_nibabel(path: str) -> Signals:
+    """Fallback NIfTI-MRS reader using nibabel directly.
 
     NIfTI-MRS stores complex FIDs with the spectral dimension along axis 3 and the
     dwell time in "pixdim[4]". Spatial / higher dimensions are flattened to the batch.
+    Note: the dwell time is read as-is (assumed seconds) and no conjugation convention
+    is applied; install the "nifti-mrs" package for standard-compliant reading.
     """
-    try:
-        import nibabel as nib
-    except ImportError as err:
-        raise ImportError(
-            "Reading NIfTI-MRS requires 'nibabel'. Install it with "
-            "'pip install lcmodel_wrapper[nifti]' or 'pip install nibabel'."
-        ) from err
+    import nibabel as nib
 
     img = nib.load(path)
     data = np.asanyarray(img.dataobj)
@@ -122,9 +171,9 @@ def _nifti_spectrometer_freq(img) -> Optional[float]:
     return None
 
 
-#********************#
-#   jMRUI text reader #
-#********************#
+#***********************#
+#   jMRUI text reader   #
+#***********************#
 def read_jmrui_txt(path: str) -> Tuple[np.ndarray, dict]:
     """Read a single jMRUI ".txt" file -> (complex FID, metadata dict)."""
     meta = {}
@@ -202,6 +251,10 @@ def load_signals(data, domain: str = "time", dwell: Optional[float] = None,
             sig = Signals(fids=from_raw(data)[np.newaxis, :])
         else:
             raise ValueError(f"Unsupported file type: {data}")
+    elif isinstance(data, (list, tuple)) and len(data) > 0 and all(
+        isinstance(p, str) and p.lower().endswith((".nii", ".nii.gz")) for p in data
+    ):
+        sig = read_nifti_mrs(list(data))
     else:
         sig = Signals(fids=_normalize_array(data))
 
@@ -215,9 +268,9 @@ def load_signals(data, domain: str = "time", dwell: Optional[float] = None,
     return sig
 
 
-#************************#
+#***********************#
 #   write to .RAW file   #
-#************************#
+#***********************#
 def to_raw(fid, file_path, header=" $NMID\n  id='', fmtdat='(2E15.6)'\n $END\n"):
     with open(file_path, "w") as file:
         file.write(header)
@@ -225,9 +278,9 @@ def to_raw(fid, file_path, header=" $NMID\n  id='', fmtdat='(2E15.6)'\n $END\n")
             file.write(f"  {num.real: .6E} {num.imag: .6E}\n")
 
 
-#*************************#
+#************************#
 #   read from .RAW file   #
-#*************************#
+#************************#
 def from_raw(path) -> np.ndarray:
     with open(path, "r") as f:
         lines = f.readlines()

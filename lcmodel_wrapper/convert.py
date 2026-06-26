@@ -9,7 +9,7 @@
 # Purpose: Best-effort conversion of common MRS basis-set formats to the LCModel ".basis" format,  #
 #          inspired by the MRS Basis Set Conversion Toolbox                                        #
 #          (https://github.com/igweckay/MRS-Basis-Set-Conversion-Toolbox). Supported inputs:       #
-#          an existing ".basis" file (pass-through), a jMRUI/AQSES/QUEST ".txt" folder, an         #
+#          an existing ".basis" file (pass-through), a jMRUI/AQSES/QUEST ".txt" folder, an          #
 #          FSL-MRS ".json" folder, an LCModel ".RAW" folder, and an Osprey/FID-A ".mat" struct.    #
 #          The output is NOT independently validated against LCModel makebasis -- verify your      #
 #          fits.                                                                                    #
@@ -99,9 +99,9 @@ def _stack(parsed: ParsedBasis) -> None:
             )
 
 
-#*****************************#
-#   jMRUI / AQSES / QUEST      #
-#*****************************#
+#***************************#
+#   jMRUI / AQSES / QUEST   #
+#***************************#
 def _read_jmrui_folder(folder: str) -> ParsedBasis:
     files = sorted(f for f in os.listdir(folder) if f.lower().endswith(".txt"))
     if not files:
@@ -122,9 +122,9 @@ def _read_jmrui_folder(folder: str) -> ParsedBasis:
     return ParsedBasis(names, fids, dwell, central, echot)
 
 
-#*****************************#
-#   FSL-MRS .json folder       #
-#*****************************#
+#**************************#
+#   FSL-MRS .json folder   #
+#**************************#
 def _read_fsl_folder(folder: str) -> ParsedBasis:
     files = sorted(f for f in os.listdir(folder) if f.lower().endswith(".json"))
     if not files:
@@ -198,9 +198,9 @@ def _read_raw_folder(folder: str) -> ParsedBasis:
     return ParsedBasis(names, fids, dwell, central, echot)
 
 
-#*****************************#
-#   Osprey / FID-A .mat        #
-#*****************************#
+#*************************#
+#   Osprey / FID-A .mat   #
+#*************************#
 def _mat_attr(struct, *candidates):
     for name in candidates:
         if hasattr(struct, name):
@@ -265,9 +265,9 @@ def _read_mat(path: str) -> ParsedBasis:
     )
 
 
-#*****************************#
-#   format detection           #
-#*****************************#
+#**********************#
+#   format detection   #
+#**********************#
 _READERS: Dict[str, Callable[[str], ParsedBasis]] = {
     "jmrui": _read_jmrui_folder,
     "fsl": _read_fsl_folder,
@@ -304,9 +304,9 @@ def detect_format(path: str) -> str:
     raise ValueError(f"Path does not exist: {path}")
 
 
-#*****************************#
-#   public entry              #
-#*****************************#
+#******************#
+#   public entry   #
+#******************#
 def convert_to_basis(path: str, out_path: Optional[str] = None, fmt: Optional[str] = None,
                      dwell: Optional[float] = None, central_freq: Optional[float] = None,
                      echo_time: Optional[float] = None) -> str:

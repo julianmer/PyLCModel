@@ -45,9 +45,9 @@ class LCModelBasis:
         return len(self.names)
 
 
-#*********************************#
-#   parse a single namelist value #
-#*********************************#
+#***********************************#
+#   parse a single namelist value   #
+#***********************************#
 def _find_scalar(text: str, key: str):
     """Return the first numeric scalar assigned to "key" (e.g. "HZPPPM = 123.26")."""
     m = re.search(rf"{key}\s*=\s*([-+0-9.eEdD]+)", text)
@@ -60,9 +60,9 @@ def _find_scalar(text: str, key: str):
         return None
 
 
-#*****************#
-#   read a basis  #
-#*****************#
+#******************#
+#   read a basis   #
+#******************#
 def read_basis(path: str) -> LCModelBasis:
     """Parse an LCModel ".basis" file and return an LCModelBasis.
 

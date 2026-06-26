@@ -21,9 +21,9 @@ DEFAULT_IGNORE = ["Lip13a", "Lip13b", "Lip09", "Lip20",
                   "-CrCH2", "CrCH2"]
 
 
-#*********************#
-#   ignore presets    #
-#*********************#
+#********************#
+#   ignore presets   #
+#********************#
 def resolve_ignore(ignore) -> List[str]:
     if isinstance(ignore, str):
         if ignore.lower() == "default":
@@ -38,9 +38,9 @@ def resolve_ignore(ignore) -> List[str]:
     raise ValueError("ignore must be a list of metabolite names or a preset string.")
 
 
-#************************#
-#   build a control set  #
-#************************#
+#*************************#
+#   build a control set   #
+#*************************#
 def build_control(path2basis: str, n_points: int, bandwidth: float, central_freq: float,
                   ppmlim: Tuple[float, float] = (0.5, 4.2), ignore=DEFAULT_IGNORE,
                   dows: bool = False) -> List[str]:
@@ -72,9 +72,9 @@ def build_control(path2basis: str, n_points: int, bandwidth: float, central_freq
     return lines
 
 
-#************************#
-#   load + override file #
-#************************#
+#*************************#
+#   load + override file   #
+#*************************#
 def load_control(control_path: str, path2basis: str, ppmlim: Tuple[float, float],
                  ignore=DEFAULT_IGNORE) -> List[str]:
     """Read an existing control file and override basis, ppm limits and ignored metabolites."""
@@ -101,9 +101,9 @@ def load_control(control_path: str, path2basis: str, ppmlim: Tuple[float, float]
     return control
 
 
-#*****************************#
-#   set a key in a control set#
-#*****************************#
+#********************************#
+#   set a key in a control set   #
+#********************************#
 def set_key(control: List[str], key: str, value) -> List[str]:
     """Set "key=value" in place; append if the key is absent (before "$END")."""
     prefix = f"{key}="

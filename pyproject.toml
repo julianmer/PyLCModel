@@ -7,23 +7,24 @@ name = "lcmodel_wrapper"
 version = "0.2.0"
 description = "Lightweight Python wrapper for LCModel MRS fitting"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 
 authors = [
   { name = "Julian Merkofer", email = "j.p.merkofer@tue.nl" }
 ]
 
-# Core stays intentionally light. LCModel binaries are downloaded on demand from
+# Core stays light. LCModel binaries are downloaded on demand from
 # https://github.com/schorschinho/LCModel (or built from source via gfortran).
 dependencies = [
   "numpy>=1.22",
-  "scipy>=1.10"
+  "scipy>=1.10",
+  "nibabel>=4.0",
+  "nifti-mrs>=1.0"
 ]
 
 [project.optional-dependencies]
-nifti = ["nibabel>=4.0"]
-test = ["pandas>=1.4", "openpyxl>=3.0", "nibabel>=4.0"]
+test = ["pandas>=1.4", "openpyxl>=3.0"]
 
 [project.urls]
 Homepage = "https://github.com/julianmer/PyLCModel"

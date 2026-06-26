@@ -151,9 +151,9 @@ class PyLCModel:
         assert x0 is None, "Initial values not supported... (please set x0=None)"
         return self.lcmodel_minimize(x, x_ref, frac)
 
-    #*********************#
+    #********************#
     #   LCModel fitting   #
-    #*********************#
+    #********************#
     def lcmodel_minimize(self, x, x_ref=None, frac=None):
         # load + normalize input to time-domain FIDs
         signals = io.load_signals(x, domain=self.domain)

@@ -91,9 +91,9 @@ def read_coord(path, coord=True, meta=True):
         return fwhm, snr, shift, phase
 
 
-#**************************************#
+#*************************************#
 #   load LCModel fit from coord data   #
-#**************************************#
+#*************************************#
 def read_fit(path):
     """Read the fitted spectral series from an LCModel ".coord" file.
 
