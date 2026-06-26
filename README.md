@@ -1,10 +1,12 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/julianmer/PyLCModel/main/assets/logo.png" alt="PyLCModel" width="320">
-</p>
+<div align="center">
+  <img src="https://raw.githubusercontent.com/julianmer/PyLCModel/main/assets/logo_grey.png" alt="PyLCModel Logo" width="160"/>
+  <h1>PyLCModel</h1>
+  <p><em>A lightweight Python wrapper for LCModel spectral fitting in MR spectroscopy</em></p>
 
-# PyLCModel
-
-[![PyPI version](https://badge.fury.io/py/lcmodel-wrapper.svg)](https://badge.fury.io/py/lcmodel-wrapper)
+  [![PyPI version](https://badge.fury.io/py/lcmodel-wrapper.svg)](https://pypi.org/project/lcmodel-wrapper/)
+  [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
+  [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+</div>
 
 **PyLCModel** is a lightweight Python wrapper that streamlines the use of [LCModel](https://s-provencher.com/lcmodel.shtml) for least-squares spectral fitting in MRS. It automates control-file generation, handles flexible data input, manages the LCModel executable for you, and parses the output (with single- and multi-core processing).
 
@@ -115,3 +117,9 @@ This wrapper (the Python code) is released under the **Apache License 2.0** (see
 - LCModel binaries: [schorschinho/LCModel](https://github.com/schorschinho/LCModel) (Georg Oeltzschner and contributors)
 - Basis conversion reference: [MRS Basis Set Conversion Toolbox](https://github.com/igweckay/MRS-Basis-Set-Conversion-Toolbox) (Kay Igwe)
 - NIfTI-MRS: [spec2nii](https://github.com/wtclarke/spec2nii), [NIfTI-MRS Pyhton tools](https://github.com/wtclarke/nifti_mrs_tools) (Will Clarke)
+
+---
+
+<div align="center">
+  <sub>Built with ❤️ for the MRS community</sub>
+</div>
