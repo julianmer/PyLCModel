@@ -1,6 +1,6 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/julianmer/PyLCModel/main/assets/logo_grey.png" alt="PyLCModel Logo" width="160"/>
-  <h1 style="margin-top:0px; margin-bottom: 5px;">PyLCModel</h1>
+  <h1 style="margin-top:-10px; margin-bottom: 5px;">PyLCModel</h1>
   <p style="margin-top: 0px;"><em>A lightweight Python wrapper for LCModel spectral fitting in MR spectroscopy</em></p>
 
   [![PyPI version](https://badge.fury.io/py/lcmodel-wrapper.svg)](https://pypi.org/project/lcmodel-wrapper/)
