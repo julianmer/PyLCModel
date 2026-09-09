@@ -371,9 +371,10 @@ jobs:
           python-version: '3.12'
 
       - name: Check that the tag matches the package version
-        # The wheel pulls the release tagged "v<version>", so the two must agree.
+        # The wheel pulls the release tagged "v<version>", so the two must agree. Read
+        # the file as text: importing the package would need its dependencies installed.
         run: |
-          version=$(python -c "from lcmodel_wrapper._version import __version__; print(__version__)")
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' lcmodel_wrapper/_version.py)
           [ "v${version}" = "${GITHUB_REF_NAME}" ] \
             || { echo "tag ${GITHUB_REF_NAME} but _version.py says ${version}" >&2; exit 1; }
 
