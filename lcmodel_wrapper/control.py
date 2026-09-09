@@ -38,6 +38,10 @@ def resolve_ignore(ignore) -> List[str]:
     raise ValueError("ignore must be a list of metabolite names or a preset string.")
 
 
+def _omit_lines(ignore: List[str]) -> List[str]:
+    return [f"nomit={len(ignore)}"] + [f"chomit({i + 1})='{m}'" for i, m in enumerate(ignore)]
+
+
 #*************************#
 #   build a control set   #
 #*************************#
@@ -45,31 +49,25 @@ def build_control(path2basis: str, n_points: int, bandwidth: float, central_freq
                   ppmlim: Tuple[float, float] = (0.5, 4.2), ignore=DEFAULT_IGNORE,
                   dows: bool = False) -> List[str]:
     """Create a default LCModel control file as a list of lines."""
-    ignore = resolve_ignore(ignore)
-    lines = []
-    lines.append("$LCMODL")
-    lines.append(f"nunfil={n_points}")               # data points
-    lines.append(f"deltat={1.0 / bandwidth}")        # dwell time
-    lines.append(f"hzpppm={central_freq}")           # field strength in MHz
-    lines.append(f"ppmst={ppmlim[1]}")
-    lines.append(f"ppmend={ppmlim[0]}")
-
-    lines.append(f"dows={'T' if dows else 'F'}")     # water scaling
-    lines.append("neach=99")                          # plot each metabolite fit
-
-    lines.append(f"filbas='{os.path.abspath(path2basis)}'")
-    lines.append("filraw='example.raw'")
-    lines.append("filps='example.ps'")
-    lines.append("filcoo='example.coord'")
-    lines.append("filh2o='example.h2o'")
-
-    lines.append("lcoord=9")                           # 9 -> write coord file
-    lines.append(f"nomit={len(ignore)}")
-    for i, met in enumerate(ignore):
-        lines.append(f"chomit({i + 1})='{met}'")
-    lines.append("namrel='Cr+PCr'")
-    lines.append("$END")
-    return lines
+    return [
+        "$LCMODL",
+        f"nunfil={n_points}",                 # data points
+        f"deltat={1.0 / bandwidth}",          # dwell time
+        f"hzpppm={central_freq}",             # field strength in MHz
+        f"ppmst={ppmlim[1]}",
+        f"ppmend={ppmlim[0]}",
+        f"dows={'T' if dows else 'F'}",       # water scaling
+        "neach=99",                           # plot each metabolite fit
+        f"filbas='{os.path.abspath(path2basis)}'",
+        "filraw='example.raw'",
+        "filps='example.ps'",
+        "filcoo='example.coord'",
+        "filh2o='example.h2o'",
+        "lcoord=9",                           # 9 -> write coord file
+        *_omit_lines(resolve_ignore(ignore)),
+        "namrel='Cr+PCr'",
+        "$END",
+    ]
 
 
 #**************************#
@@ -80,24 +78,15 @@ def load_control(control_path: str, path2basis: str, ppmlim: Tuple[float, float]
     """Read an existing control file and override basis, ppm limits and ignored metabolites."""
     ignore = resolve_ignore(ignore)
     with open(control_path, "r") as fh:
-        control = fh.read().split("\n")
+        control = [line for line in fh.read().splitlines()
+                   if not line.startswith(("chomit(", "nomit="))]
 
-    for i, line in enumerate(control):
-        if line.startswith("filbas="):
-            control[i] = f"filbas='{os.path.abspath(path2basis)}'"
-
-    for i, line in enumerate(control):
-        if line.startswith("ppmst="):
-            control[i] = f"ppmst={ppmlim[1]}"
-        if line.startswith("ppmend="):
-            control[i] = f"ppmend={ppmlim[0]}"
-
-    for i, line in enumerate(control):
-        if line.startswith("nomit="):
-            control[i] = f"nomit={len(ignore)}"
-            for j, met in enumerate(ignore):
-                control.insert(i + j + 1, f"chomit({j + 1})='{met}'")
-            break
+    set_key(control, "filbas", f"'{os.path.abspath(path2basis)}'")
+    set_key(control, "ppmst", ppmlim[1])
+    set_key(control, "ppmend", ppmlim[0])
+    for line in _omit_lines(ignore):
+        key, _, value = line.partition("=")
+        set_key(control, key, value)
     return control
 
 
@@ -105,16 +94,12 @@ def load_control(control_path: str, path2basis: str, ppmlim: Tuple[float, float]
 #   set a key in a control set   #
 #********************************#
 def set_key(control: List[str], key: str, value) -> List[str]:
-    """Set "key=value" in place; append if the key is absent (before "$END")."""
+    """Set "key=value" in place; insert before "$END" (or append) if the key is absent."""
     prefix = f"{key}="
     for i, line in enumerate(control):
         if line.startswith(prefix):
             control[i] = f"{key}={value}"
             return control
-    # insert before $END if present, else append
-    for i, line in enumerate(control):
-        if line.strip() == "$END":
-            control.insert(i, f"{key}={value}")
-            return control
-    control.append(f"{key}={value}")
+    end = next((i for i, line in enumerate(control) if line.strip() == "$END"), len(control))
+    control.insert(end, f"{key}={value}")
     return control

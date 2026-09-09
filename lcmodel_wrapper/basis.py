@@ -77,14 +77,14 @@ def read_basis(path: str) -> LCModelBasis:
     with open(path, "r", errors="ignore") as fh:
         header_lines = []
         for line in fh:
-            header_lines.append(line)
+            if len(header_lines) < 200:        # scalars live near the top
+                header_lines.append(line)
             # "METABO" lines are sparse; keep scanning the whole file for them.
             # Match exactly "METABO =" (not "METABO_CONTAM" / "METABO_SINGLET").
             m = re.match(r"\s*METABO\s*=\s*'(.*?)'", line)
             if m:
                 basis.names.append(m.group(1).strip())
-
-        header = "".join(header_lines[:200])   # scalars live near the top
+        header = "".join(header_lines)
 
     basis.central_freq = _find_scalar(header, "HZPPPM")
     basis.dwell = _find_scalar(header, "BADELT")

@@ -43,38 +43,20 @@ example data used by the tests.
 
 ## How the LCModel binary is handled
 
-The LCModel program is **not** part of this package and is **not** shipped in the wheel. On first use, the binary is resolved in this order:
+LCModel is **not** shipped in the wheel. On first use it is found in this order, and the first one that works is cached:
 
-1. an explicit `path2exec="/path/to/lcmodel"` you pass to `PyLCModel`,
-2. a previously cached download/build (under `~/.cache/lcmodel_wrapper/<os>-<arch>/`, or `%LOCALAPPDATA%` on Windows; override the root with `LCMODEL_CACHE_DIR`),
-3. a download of the matching binary for your OS/architecture from [schorschinho/LCModel](https://github.com/schorschinho/LCModel),
-4. a download of the binary built by this repository's CI and attached to the [GitHub release](https://github.com/julianmer/PyLCModel/releases) matching the installed package version (Linux x86_64/aarch64 fully static, macOS arm64/x86_64 with libgfortran linked statically; each verified against its published SHA-256),
-5. **a container** — if `docker` (or `podman`) is installed and running, the image `ghcr.io/julianmer/lcmodel` is pulled and a small launcher script is cached that runs LCModel from it (Linux, macOS, and Windows),
-6. a build from the LCModel Fortran source via `gfortran` (source fetched on demand).
+1. `path2exec` you pass to `PyLCModel`,
+2. the community binary for your OS/architecture from [schorschinho/LCModel](https://github.com/schorschinho/LCModel),
+3. the binary built by this repository's CI for the installed version ([releases](https://github.com/julianmer/PyLCModel/releases); Linux x86_64/aarch64 and macOS arm64/x86_64, all statically linked),
+4. the container image `ghcr.io/julianmer/lcmodel`, if Docker or podman is running,
+5. a build from source with `gfortran`.
 
-Every candidate is **run once before it is accepted** — LCModel is asked to identify itself, and anything that cannot execute or does not answer is moved to `<cache>/quarantine/` so the next source gets a turn. This is what stops a wrong-architecture download from being cached and served forever. Set `LCMODEL_SKIP_VERIFY=1` to bypass the check, or `LCMODEL_VERIFY_TIMEOUT` to change its 60 s bound.
+Each candidate is run once before it is accepted, so a binary that cannot run on your machine is skipped rather than cached. Useful switches: `allow_download`, `allow_docker`, `allow_build` on `PyLCModel`, and the `LCMODEL_EXEC` / `LCMODEL_CACHE_DIR` environment variables.
 
-The cache is keyed by architecture, so a home directory shared across a mixed-architecture cluster does not have nodes fighting over one file.
-
-### Running from a container
-
-The container is the one option that behaves identically everywhere: inside it LCModel is always the same statically linked Linux binary, so nothing depends on your macOS version, Homebrew, or which Apple-silicon generation you have (upstream's macOS builds are tied to the machine they were compiled on, which is why an M1 build does not run on an M4). Docker Desktop, OrbStack, Colima, or rootless podman all work.
-
-On Linux and macOS the launcher bind-mounts your **working directory** and your **home directory** at the same paths inside the container, so the absolute paths in the control file need no translation. On Windows it mounts the **drives** holding those two at `/host/<LETTER>` and the wrapper rewrites the file paths in the control file to match (`C:\Users\me\x.basis` → `/host/C/Users/me/x.basis`); UNC paths are not supported. The one constraint: the basis set and any absolute `save_path` must live under the working or home directory (on Windows: on one of their drives); `PyLCModel` raises a clear error otherwise.
-
-```python
-lcmodel = PyLCModel(path2basis="~/basis/press_3t.basis")        # container used automatically if needed
-lcmodel = PyLCModel(path2basis="...", allow_docker=False)        # never use a container
-```
-
-Environment knobs: `LCMODEL_NO_DOCKER=1` disables the rung, `LCMODEL_DOCKER_IMAGE` overrides the image (e.g. a locally built one), `LCMODEL_PULL_TIMEOUT` bounds the pull (default 900 s), and `LCMODEL_RELEASE_TAG` selects which release (and matching image tag) steps 4 and 5 use instead of the default `v<package version>`. Delete `<cache>/lcmodel-container` to make the resolver try the native sources again.
-
-You can also use the image directly, without Python:
+With the container, LCModel sees your working directory and your home directory; keep the basis set and any `save_path` under one of them. The image also works on its own:
 ```bash
-docker run --rm -i -v "$PWD:$PWD" -w "$PWD" ghcr.io/julianmer/lcmodel:latest < control.file
+docker run --rm -i -v "$PWD:$PWD" -w "$PWD" ghcr.io/julianmer/lcmodel < control.file
 ```
-
-No LCModel code or binary is bundled — keeping both the repository and the PyPI wheel small. (The only git submodule in this repository is the optional example data under `example_data/`.)
 
 ---
 

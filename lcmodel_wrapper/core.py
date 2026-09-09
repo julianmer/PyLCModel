@@ -21,7 +21,6 @@ import subprocess
 import time
 
 import numpy as np
-from scipy.optimize import minimize
 
 from . import binaries, container, control as control_mod, coord as coord_mod, io
 from .basis import read_basis
@@ -83,7 +82,8 @@ class PyLCModel:
         Directory to keep intermediate files (otherwise a temporary one is used).
     path2exec : str, optional
         Explicit path to an LCModel executable. If omitted it is resolved automatically
-        (cache -> download -> release download -> container -> build).
+        (cache -> download -> release download -> container -> build); the LCMODEL_EXEC
+        environment variable is equivalent to passing it.
     domain : {"time", "freq"}
         Domain of the input data passed at fit time. Defaults to "time" (FIDs).
     sample_points, bandwidth, central_freq : optional
@@ -109,9 +109,8 @@ class PyLCModel:
     def __init__(self, path2basis, control=None, multiprocessing=False, ppmlim=(0.5, 4.2),
                  conj=True, ignore="default", save_path="", path2exec=None,
                  domain="time", sample_points=None, bandwidth=None, central_freq=None,
-                 allow_download=True, allow_build=True, convert_basis=False,
-                 basis_format=None, timeout=900, io_timeout=10, allow_docker=True,
-                 **kwargs):
+                 allow_download=True, allow_docker=True, allow_build=True,
+                 convert_basis=False, basis_format=None, timeout=900, io_timeout=10):
 
         if convert_basis:
             conv_dwell = (1.0 / bandwidth) if bandwidth else None
@@ -141,21 +140,12 @@ class PyLCModel:
                 "set. Please pass them explicitly."
             )
 
-        # resolve the LCModel executable
         self.path2exec = binaries.resolve_executable(
             path2exec=path2exec, allow_download=allow_download, allow_build=allow_build,
             allow_docker=allow_docker,
         )
         self._containerised = binaries.is_container_shim(self.path2exec)
-        if self._containerised and not container.can_see(path2basis):
-            raise ValueError(
-                f"LCModel is running from a container, which can only see the working "
-                f"directory and your home directory (on Windows: their drives); the basis "
-                f"set is outside both: {os.path.abspath(path2basis)}. Move or copy it "
-                f"under one of those."
-            )
-
-        ignore = control_mod.resolve_ignore(ignore)
+        self._check_visible(path2basis, "the basis set")
 
         # what the caller pinned, so that parameters later read off the data never
         # override an explicit choice
@@ -163,14 +153,36 @@ class PyLCModel:
                           (("sample_points", sample_points), ("bandwidth", bandwidth),
                            ("central_freq", central_freq)) if value is not None}
         self._templated = control is not None
-        self._ignore = ignore
+        self._ignore = control_mod.resolve_ignore(ignore)
 
         if control is not None:
-            self.control = control_mod.load_control(control, path2basis, ppmlim, ignore)
+            self.control = control_mod.load_control(control, path2basis, ppmlim, self._ignore)
         else:
-            self.control = control_mod.build_control(
-                path2basis, self.sample_points, self.bandwidth, self.central_freq,
-                ppmlim=ppmlim, ignore=ignore,
+            self.control = self._build_control()
+
+    #*************#
+    #   helpers   #
+    #*************#
+    def _build_control(self):
+        return control_mod.build_control(
+            self.path2basis, self.sample_points, self.bandwidth, self.central_freq,
+            ppmlim=self.ppmlim, ignore=self._ignore,
+        )
+
+    def _workdir(self):
+        """Directory for LCModel's input and output files, with a trailing separator.
+
+        An absolute save_path is used as given, a relative one is relative to the current
+        directory, and an empty one means a throwaway "tmp" folder there.
+        """
+        return os.path.join(os.path.abspath(self.save_path or "tmp"), "")
+
+    def _check_visible(self, path, what):
+        if self._containerised and not container.can_see(path):
+            raise ValueError(
+                f"LCModel runs from a container, which only sees the working directory and "
+                f"your home directory (on Windows: their drives); {what} is outside both: "
+                f"{os.path.abspath(path)}"
             )
 
     #**********************#
@@ -178,19 +190,6 @@ class PyLCModel:
     #**********************#
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
-
-    #*************************#
-    #   optimal referencing   #
-    #*************************#
-    def optimalReference(self, t, t_hat):
-        w = np.ones(t.shape[0])
-        for i in range(t.shape[0]):
-            def err(wi):
-                wi = np.clip(wi, 0, None)
-                return np.abs(t[i] - wi * t_hat[i]).mean()
-
-            w[i] = minimize(err, w[i], bounds=[(0, None)]).x
-        return w[..., np.newaxis]
 
     #****************************#
     #   loss on concentrations   #
@@ -225,7 +224,8 @@ class PyLCModel:
         "forward" keeps only the first three; the creatine ratios and the quality
         metrics are here, and they are what make one fit comparable with another.
         """
-        assert x0 is None, "Initial values not supported... (please set x0=None)"
+        if x0 is not None:
+            raise ValueError("Initial values are not supported (x0 must be None).")
         return self.lcmodel_minimize(x, x_ref, frac)
 
     #*******************************#
@@ -248,31 +248,18 @@ class PyLCModel:
 
         changed = {k: v for k, v in wanted.items()
                    if k not in self._explicit and getattr(self, k) != v}
-        if not changed:
-            return
-
         for key, value in changed.items():
             setattr(self, key, value)
-        if self._templated:
-            return          # a caller-supplied control file is left exactly as given
-
-        self.control = control_mod.build_control(
-            self.path2basis, self.sample_points, self.bandwidth, self.central_freq,
-            ppmlim=self.ppmlim, ignore=self._ignore,
-        )
+        if changed and not self._templated:   # a caller-supplied control file is left as given
+            self.control = self._build_control()
 
     #********************#
     #   LCModel fitting   #
     #********************#
     def lcmodel_minimize(self, x, x_ref=None, frac=None):
-        # load + normalize input to time-domain FIDs
         signals = io.load_signals(x, domain=self.domain)
-        fids = signals.fids
-
-        self._adopt_acquisition(signals, fids.shape[-1])
-
-        if self.conj:
-            fids = np.conjugate(fids)
+        self._adopt_acquisition(signals, signals.fids.shape[-1])
+        fids = np.conjugate(signals.fids) if self.conj else signals.fids
 
         water = None
         if x_ref is not None:
@@ -289,65 +276,45 @@ class PyLCModel:
                     f"supply one per spectrum."
                 )
 
-        # create working directory. An absolute save_path is used as given; a relative
-        # one stays relative to the current directory, as before.
-        if self.save_path in ("", None):
-            path = os.path.join(os.getcwd(), "tmp") + os.sep
-        else:
-            path = os.path.join(os.getcwd(), self.save_path) + os.sep
-        if not os.path.exists(path):
-            os.makedirs(path)
-        if self._containerised and not container.can_see(path):
-            raise ValueError(
-                f"LCModel is running from a container, which can only see the working "
-                f"directory and your home directory; save_path is outside both: {path}"
-            )
+        path = self._workdir()
+        os.makedirs(path, exist_ok=True)
+        self._check_visible(path, "save_path")
 
+        tasks = [(fid, water, frac, i, path) for i, fid in enumerate(fids)]
         if self.multiprocessing:
-            tasks = [(fids[i], water, frac, i, path) for i in range(fids.shape[0])]
-            with mp.Pool(None) as pool:
-                reports = list(pool.starmap(self.lcm_forward, tasks))
+            with mp.Pool() as pool:
+                reports = pool.starmap(self.lcm_forward, tasks)
         else:
-            reports = [self.lcm_forward(fid, water, frac, i, path)
-                       for i, fid in enumerate(fids)]
+            reports = [self.lcm_forward(*task) for task in tasks]
 
-        if self.save_path in ("", None):
+        if self.save_path:
+            with open(os.path.join(path, "control"), "w") as fh:
+                fh.write("\n".join(self.control))
+        else:
             shutil.rmtree(path, ignore_errors=True)
-        else:
-            with open(f"{path + os.sep}control", "w") as file:
-                file.write("\n".join(self.control))
-
         return reports
 
     #*************************#
     #   run LCModel wrapper   #
     #*************************#
     def lcm_forward(self, fid, h2o=None, frac=None, idx=0, path=None):
-        if path is None:
-            path = os.path.join(os.getcwd(), "tmp")
-        # normalised here so that a path without a trailing separator works: the .raw
-        # was written to path + os.sep while the .coord was read from bare path
-        path = os.path.join(path, "")
-        assert fid.shape[0] == self.sample_points, \
-            "Number of points in FID does not match sample points!"
+        if fid.shape[0] != self.sample_points:
+            raise ValueError(f"FID has {fid.shape[0]} points but sample_points is "
+                             f"{self.sample_points}.")
+        stem = os.path.join(path or self._workdir(), f"temp{idx}")
 
-        io.to_raw(fid, f"{path}temp{idx}.raw")
-
+        io.to_raw(fid, f"{stem}.raw")
         if h2o is not None:
-            io.to_raw(h2o[idx], f"{path}temp{idx}.h2o")
-            self.control = control_mod.set_key(self.control, "dows", "T")
-
+            io.to_raw(h2o[idx], f"{stem}.h2o")
+            control_mod.set_key(self.control, "dows", "T")
         if frac is not None:
             wconc = (43300 * frac[idx]["GM"] + 35880 * frac[idx]["WM"] +
                      55556 * frac[idx]["CSF"]) / (1 - frac[idx]["CSF"])
-            self.control = control_mod.set_key(self.control, "wconc", int(wconc))
+            control_mod.set_key(self.control, "wconc", int(wconc))
 
-        output = self.initiate(f"{path}temp{idx}.raw")
-
-        coord_path = f"{path}temp{idx}.coord"
-        _wait_for_file(coord_path, self.io_timeout, output)
-
-        return coord_mod.read_coord(coord_path, meta=True)
+        output = self.initiate(f"{stem}.raw")
+        _wait_for_file(f"{stem}.coord", self.io_timeout, output)
+        return coord_mod.read_coord(f"{stem}.coord", meta=True)
 
     #************************#
     #   align to the basis   #
@@ -361,43 +328,31 @@ class PyLCModel:
         saying "no information".
         """
         metabs, concs, crlbs = report[0], report[1], report[2]
-        return ([concs[metabs.index(m)] if m in metabs else 0.0 for m in self.basis.names],
-                [crlbs[metabs.index(m)] if m in metabs else 999.0 for m in self.basis.names])
+        conc, crlb = dict(zip(metabs, concs)), dict(zip(metabs, crlbs))
+        return ([conc.get(m, 0.0) for m in self.basis.names],
+                [crlb.get(m, 999.0) for m in self.basis.names])
 
     #******************************#
     #   initiate routine on .raw   #
     #******************************#
     def initiate(self, file_path):
         """Run LCModel on a ".raw" file. Returns whatever LCModel printed."""
-        self.control = control_mod.set_key(self.control, "filraw", f"'{file_path}'")
-        self.control = control_mod.set_key(self.control, "filps", f"'{file_path[:-4]}.ps'")
-        self.control = control_mod.set_key(self.control, "filcoo", f"'{file_path[:-4]}.coord'")
-        self.control = control_mod.set_key(self.control, "filh2o", f"'{file_path[:-4]}.h2o'")
+        stem = os.path.splitext(file_path)[0]
+        for key, value in (("filraw", file_path), ("filps", f"{stem}.ps"),
+                           ("filcoo", f"{stem}.coord"), ("filh2o", f"{stem}.h2o")):
+            control_mod.set_key(self.control, key, f"'{value}'")
 
         # Only the copy piped to LCModel is rewritten for a container; the outputs are
         # still read back at the host paths kept in self.control.
         lines = container.translate_control(self.control) if self._containerised else self.control
-        msg = "\n".join(lines).encode("utf-8")
-        proc = subprocess.Popen(
-            [self.path2exec],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
         try:
-            stdout_value, stderr_value = proc.communicate(msg, timeout=self.timeout)
+            proc = subprocess.run([self.path2exec], input="\n".join(lines).encode("utf-8"),
+                                  capture_output=True, timeout=self.timeout)
         except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate()
-            raise LCModelError(
-                f"LCModel did not finish within {self.timeout:g}s on "
-                f"{os.path.basename(file_path)}."
-            )
+            raise LCModelError(f"LCModel did not finish within {self.timeout:g}s on "
+                               f"{os.path.basename(file_path)}.") from None
 
-        output = "".join(
-            v.decode("utf-8", errors="ignore")
-            for v in (stdout_value, stderr_value) if v
-        )
+        output = (proc.stdout + proc.stderr).decode("utf-8", errors="ignore")
         if output:
             print(output)
         return output
@@ -417,7 +372,7 @@ class PyLCModel:
     def read_LCModel_fit(self, path):
         return coord_mod.read_fit(path)
 
-    def to_raw(self, fid, file_path, header=" $NMID\n  id='', fmtdat='(2E15.6)'\n $END\n"):
+    def to_raw(self, fid, file_path, header=io.RAW_HEADER):
         return io.to_raw(fid, file_path, header=header)
 
     def from_raw(self, path):

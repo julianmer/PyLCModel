@@ -15,6 +15,22 @@ import re
 
 import numpy as np
 
+_NUMBER = r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?"
+
+# One row of the concentration table: "  7.20E-08 166% 3.9E-02 Ala". The columns are
+# fixed-width, so a wide ratio runs straight into the metabolite name ("0.659Cr+PCr");
+# the regex therefore allows no whitespace between the two.
+_CONC_ROW = re.compile(rf"^\s*({_NUMBER})\s+(\d+)%\s+({_NUMBER})\s*(\S+)\s*$")
+
+# Markers that open a block of numbers in the fitted-series part of the file.
+_SERIES = (
+    ("ppm",         re.compile(r"points on ppm-axis = NY")),
+    ("data",        re.compile(r"NY phased data points follow")),
+    ("completeFit", re.compile(r"NY points of the fit to the data follow")),
+    ("baseline",    re.compile(r"NY background values follow")),
+)
+_SERIES_END = re.compile(r"lines in following|^[ ]+[a-zA-Z0-9]+[ ]+Conc\. = [-+.E0-9]+$")
+
 
 #*****************************#
 #   load LCModel coord data   #
@@ -26,69 +42,43 @@ def read_coord(path, coord=True, meta=True):
     and/or the misc. QC metrics (FWHM, S/N, shift, phase) depending on "coord"/"meta".
     """
     metabs, concs, crlbs, tcr = [], [], [], []
-    fwhm, snr, shift, phase = None, None, None, None
+    fwhm = snr = shift = phase = None
 
-    with open(path, "r") as file:
-        concReader = 0
-        miscReader = 0
-
-        for line in file:
+    with open(path, "r") as fh:
+        conc_rows = misc_rows = 0
+        for line in fh:
             if "lines in following concentration table" in line:
-                concReader = int(line.split(" lines")[0])
-            elif concReader > 0:  # read concentration table
-                concReader -= 1
-                values = line.split()
-
-                if values[0] == "Conc.":   # header row
+                conc_rows = int(line.split(" lines")[0])
+            elif conc_rows > 0:
+                conc_rows -= 1
+                if line.split()[:1] == ["Conc."]:   # header row
                     continue
-                else:
-                    try:  # sometimes the fields are fused together with '+'
-                        m = values[3]
-                        c = float(values[2])
-                    except (IndexError, ValueError):
-                        if "E+" in values[2]:  # catch scientific notation
-                            c = values[2].split("E+")
-                            m = str(c[1].split("+")[1:])
-                            c = float(c[0] + "e+" + c[1].split("+")[0])
-                        else:
-                            if len(values[2].split("+")) > 1:
-                                m = str(values[2].split("+")[1:])
-                                c = float(values[2].split("+")[0])
-                            elif len(values[2].split("-")) > 1:
-                                m = str(values[2].split("-")[1:])
-                                c = float(values[2].split("-")[0])
-                            else:
-                                raise ValueError(f"Could not parse {values}")
-
-                    metabs.append(m)
-                    concs.append(float(values[0]))
-                    crlbs.append(int(values[1][:-1]))
-                    tcr.append(c)
-                    continue
-
-            if "lines in following misc. output table" in line:
-                miscReader = int(line.split(" lines")[0])
-            elif miscReader > 0:  # read misc. output table
-                miscReader -= 1
+                m = _CONC_ROW.match(line)
+                if m is None:
+                    raise ValueError(f"Could not parse concentration row: {line.strip()!r}")
+                concs.append(float(m.group(1)))
+                crlbs.append(int(m.group(2)))
+                tcr.append(float(m.group(3)))
+                metabs.append(m.group(4))
+            elif "lines in following misc. output table" in line:
+                misc_rows = int(line.split(" lines")[0])
+            elif misc_rows > 0:
+                misc_rows -= 1
                 values = line.split()
-
                 if "FWHM" in values:
                     fwhm = float(values[2])
                     snr = float(values[-1].split("=")[-1])
                 elif "shift" in values:
-                    if values[3] == "ppm":
-                        shift = float(values[2][1:])  # negative fuses with '='
-                    else:
-                        shift = float(values[3])
+                    # a negative shift fuses with the "=": "shift =-0.012 ppm"
+                    shift = float(values[2][1:]) if values[3] == "ppm" else float(values[3])
                 elif "Ph" in values:
                     phase = float(values[1])
 
     if coord and meta:
         return metabs, concs, crlbs, tcr, fwhm, snr, shift, phase
-    elif coord:
+    if coord:
         return metabs, concs, crlbs, tcr
-    elif meta:
-        return fwhm, snr, shift, phase
+    return fwhm, snr, shift, phase
 
 
 #**************************************#
@@ -100,37 +90,26 @@ def read_fit(path):
     Returns a dict with keys "ppm", "data", "completeFit" and "baseline".
     Source: https://gist.github.com/alexcraven/3db2c09f14ec489a31df81dc7b5a0f9c
     """
-    series_type = None
-    series_data = {}
+    series = {}
+    current, values = None, []
 
-    with open(path) as f:
-        vals = []
+    def flush():
+        if current and values:
+            series[current] = np.array(values)
 
-        for line in f:
-            prev_series_type = series_type
-            if re.match(".*[0-9]+ points on ppm-axis = NY.*", line):
-                series_type = "ppm"
-            elif re.match(".*NY phased data points follow.*", line):
-                series_type = "data"
-            elif re.match(".*NY points of the fit to the data follow.*", line):
-                series_type = "completeFit"
-            elif re.match(".*NY background values follow.*", line):
-                series_type = "baseline"
-            elif re.match(".*lines in following.*", line):
-                series_type = None
-            elif re.match("[ ]+[a-zA-Z0-9]+[ ]+Conc. = [-+.E0-9]+$", line):
-                series_type = None
-
-            if prev_series_type != series_type:  # start/end of chunk
-                if len(vals) > 0:
-                    series_data[prev_series_type] = np.array(vals)
-                    vals = []
-            else:
-                if series_type:
-                    for x in re.finditer(r"([-+.E0-9]+)[ \t]*", line):
-                        v = x.group(1)
-                        try:
-                            vals.append(float(v))
-                        except ValueError:
-                            pass
-    return series_data
+    with open(path) as fh:
+        for line in fh:
+            new = next((key for key, pat in _SERIES if pat.search(line)), current)
+            if _SERIES_END.search(line):
+                new = None
+            if new != current:
+                flush()
+                current, values = new, []
+            elif current:
+                for token in re.findall(r"[-+.E0-9]+", line):
+                    try:
+                        values.append(float(token))
+                    except ValueError:
+                        pass
+    flush()
+    return series

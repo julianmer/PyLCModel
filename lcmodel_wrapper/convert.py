@@ -26,8 +26,6 @@ import numpy as np
 from .io import read_jmrui_txt, jmrui_metadata
 
 
-
-
 #*******************#
 #   .basis writer   #
 #*******************#
@@ -85,8 +83,8 @@ class ParsedBasis(NamedTuple):
     echot: Optional[float]
 
 
-def _stack(parsed: ParsedBasis) -> None:
-    """Validate a ParsedBasis in place (consistent, non-empty point counts)."""
+def _validate(parsed: ParsedBasis) -> None:
+    """Consistent, non-empty point counts across all metabolites."""
     if not parsed.fids:
         raise ValueError("No metabolite FIDs were found in the input.")
     n = parsed.fids[0].size
@@ -108,18 +106,17 @@ def _read_jmrui_folder(folder: str) -> ParsedBasis:
         raise ValueError(f"No .txt files found in jMRUI folder: {folder}")
 
     names, fids = [], []
-    dwell = central = echot = None
+    dwell = central = None
     for f in files:
         fid, meta = read_jmrui_txt(os.path.join(folder, f))
         if fid.size == 0:
             continue
-        d, c, e = jmrui_metadata(meta)
+        d, c = jmrui_metadata(meta)
         dwell = dwell if dwell is not None else d
         central = central if central is not None else c
-        echot = echot if echot is not None else e
         names.append(os.path.splitext(f)[0])
         fids.append(fid)
-    return ParsedBasis(names, fids, dwell, central, echot)
+    return ParsedBasis(names, fids, dwell, central, None)
 
 
 #**************************#
@@ -209,10 +206,7 @@ def _mat_attr(struct, *candidates):
 
 
 def _read_mat(path: str) -> ParsedBasis:
-    try:
-        from scipy.io import loadmat
-    except ImportError as exc:   # pragma: no cover
-        raise ImportError("Reading .mat basis sets requires scipy.") from exc
+    from scipy.io import loadmat
     try:
         mat = loadmat(path, squeeze_me=True, struct_as_record=False)
     except NotImplementedError as exc:   # MATLAB v7.3 (HDF5)
@@ -331,7 +325,7 @@ def convert_to_basis(path: str, out_path: Optional[str] = None, fmt: Optional[st
         raise ValueError(f"Unknown basis format '{fmt}'. Choose from {sorted(_READERS)}.")
 
     parsed = _READERS[key](path)
-    _stack(parsed)
+    _validate(parsed)
 
     d = parsed.dwell if parsed.dwell is not None else dwell
     c = parsed.central if parsed.central is not None else central_freq
@@ -361,4 +355,3 @@ def ensure_basis(path: str, out_path: Optional[str] = None, fmt: Optional[str] =
     return convert_to_basis(
         path, out_path=out_path, fmt=fmt, dwell=dwell, central_freq=central_freq
     )
-

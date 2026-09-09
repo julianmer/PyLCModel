@@ -49,9 +49,9 @@ _RAW_BASE = "https://raw.githubusercontent.com/schorschinho/LCModel/main"
 _BINARIES = {
     "linux-x86_64":   ("binaries/linux/lcmodel.xz", "xz", "lcmodel"),
     # Upstream has no aarch64 Linux build yet. The entry is kept so that the moment one
-    # lands the download path starts working with no release on our side; until then the
-    # fetch 404s and resolution falls through to the gfortran build. The directory name
-    # is what "uname -m" reports, matching the path the upstream Makefile derives.
+    # lands it is used with no release on our side; until then the fetch 404s and the
+    # PyLCModel release below covers it. The directory name is what "uname -m" reports,
+    # matching the path the upstream Makefile derives.
     "linux-aarch64":  ("binaries/linux/aarch64/lcmodel.xz", "xz", "lcmodel"),
     "darwin-arm64":   ("binaries/macos/sequoia/m4/lcmodel.zip", "zip", "lcmodel"),
     "darwin-arm64-monterey": ("binaries/macos/monterey/m1/lcmodel.zip", "zip", "lcmodel"),
@@ -508,20 +508,25 @@ def _container_cli() -> Optional[str]:
     return None
 
 
-def _container_ready(cli: str, timeout: float = 30.0) -> Tuple[bool, str]:
-    """Is the engine actually usable - daemon running, socket reachable, permissions ok?"""
+def _engine(cli: str, *args: str, timeout: float) -> Tuple[int, str]:
+    """Run a container-engine command. Returns (exit code, last stderr line); the code
+    is -1 when the command could not run or time out."""
     try:
-        proc = subprocess.run([cli, "info"], stdin=subprocess.DEVNULL,
+        proc = subprocess.run([cli, *args], stdin=subprocess.DEVNULL,
                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                               timeout=timeout)
     except subprocess.TimeoutExpired:
-        return False, f"'{cli} info' did not answer within {timeout:.0f}s"
+        return -1, f"'{cli} {args[0]}' did not finish within {timeout:.0f}s"
     except OSError as err:
-        return False, f"cannot run '{cli}': {err}"
-    if proc.returncode != 0:
-        lines = (proc.stderr or b"").decode("utf-8", "replace").strip().splitlines()
-        return False, lines[-1] if lines else f"'{cli} info' exited {proc.returncode}"
-    return True, "ok"
+        return -1, f"cannot run '{cli}': {err}"
+    lines = (proc.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+    return proc.returncode, lines[-1] if lines else f"'{cli} {args[0]}' exited {proc.returncode}"
+
+
+def _container_ready(cli: str, timeout: float = 30.0) -> Tuple[bool, str]:
+    """Is the engine actually usable - daemon running, socket reachable, permissions ok?"""
+    code, why = _engine(cli, "info", timeout=timeout)
+    return code == 0, "ok" if code == 0 else why
 
 
 def is_container_shim(path) -> bool:
@@ -563,35 +568,17 @@ def _container_shim(cache: Path) -> Optional[Path]:
         return None
 
     image = _container_image()
-    if not _image_present(cli, image):
+    # already in the local store (pulled earlier, or built by hand): no network needed,
+    # which keeps this rung working offline
+    if _engine(cli, "image", "inspect", image, timeout=30)[0] != 0:
         print(f"[lcmodel_wrapper] Pulling LCModel container image {image}")
-        try:
-            proc = subprocess.run([cli, "pull", image], stdin=subprocess.DEVNULL,
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                                  timeout=_PULL_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            print(f"[lcmodel_wrapper] Pulling {image} did not finish within "
-                  f"{_PULL_TIMEOUT:.0f}s (raise LCMODEL_PULL_TIMEOUT to wait longer)")
-            return None
-        if proc.returncode != 0:
-            lines = (proc.stderr or b"").decode("utf-8", "replace").strip().splitlines()
-            print(f"[lcmodel_wrapper] Could not pull {image}: "
-                  f"{lines[-1] if lines else proc.returncode}")
+        code, why = _engine(cli, "pull", image, timeout=_PULL_TIMEOUT)
+        if code != 0:
+            print(f"[lcmodel_wrapper] Could not pull {image}: {why} "
+                  f"(LCMODEL_PULL_TIMEOUT raises the {_PULL_TIMEOUT:.0f}s bound)")
             return None
 
     return _write_shim(cache, cli, image)
-
-
-def _image_present(cli: str, image: str) -> bool:
-    """Already in the local store (pulled earlier, or built by hand)? Then no network
-    is needed, which keeps the container rung working offline."""
-    try:
-        proc = subprocess.run([cli, "image", "inspect", image], stdin=subprocess.DEVNULL,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                              timeout=30)
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return proc.returncode == 0
 
 
 #*********************#

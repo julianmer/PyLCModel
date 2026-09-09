@@ -24,6 +24,7 @@ __all__ = [
     "from_nifti_mrs",
     "load_signals",
     "binaries",
+    "container",
     "io",
     "control",
     "coord",
