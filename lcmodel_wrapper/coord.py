@@ -6,8 +6,8 @@
 #                                                                                                  #
 # Created: 26/06/26                                                                                #
 #                                                                                                  #
-# Purpose: Parsers for LCModel ".coord" output files: the concentration / CRLB table, basic QC      #
-#          metrics, and the fitted spectral series (data, fit, baseline, ppm axis).                  #
+# Purpose: Parsers for LCModel ".coord" output files: the concentration / CRLB table, basic QC     #
+#          metrics, and the fitted spectral series (data, fit, baseline, ppm axis).                #
 #                                                                                                  #
 ####################################################################################################
 
@@ -91,9 +91,9 @@ def read_coord(path, coord=True, meta=True):
         return fwhm, snr, shift, phase
 
 
-#*************************************#
+#**************************************#
 #   load LCModel fit from coord data   #
-#*************************************#
+#**************************************#
 def read_fit(path):
     """Read the fitted spectral series from an LCModel ".coord" file.
 

@@ -6,9 +6,9 @@
 #                                                                                                  #
 # Created: 26/06/26                                                                                #
 #                                                                                                  #
-# Purpose: Lightweight parser for LCModel ".basis" files. Replaces the previous dependency on       #
+# Purpose: Lightweight parser for LCModel ".basis" files. Replaces the previous dependency on      #
 #          fsl_mrs for reading basis metadata. It extracts only what the wrapper needs to build    #
-#          control files and to align fitted concentrations: the field strength (HZPPPM), dwell       #
+#          control files and to align fitted concentrations: the field strength (HZPPPM), dwell    #
 #          time (BADELT), number of points (NDATAB) and the ordered metabolite names (METABO).     #
 #                                                                                                  #
 ####################################################################################################

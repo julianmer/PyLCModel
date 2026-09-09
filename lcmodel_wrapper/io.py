@@ -7,9 +7,9 @@
 # Created: 26/06/26                                                                                #
 #                                                                                                  #
 # Purpose: Flexible input handling for PyLCModel. Accepts NumPy arrays (complex FIDs, or           #
-#          real/imag stacked spectra) in the time or frequency domain, NIfTI-MRS files (read        #
+#          real/imag stacked spectra) in the time or frequency domain, NIfTI-MRS files (read       #
 #          via the "nifti-mrs" package when available, falling back to nibabel), jMRUI text        #
-#          files and LCModel ".RAW" files. Plus helpers to write/read the LCModel ".RAW"             #
+#          files and LCModel ".RAW" files. Plus helpers to write/read the LCModel ".RAW"           #
 #          format used to feed the executable.                                                     #
 #                                                                                                  #
 ####################################################################################################
@@ -95,6 +95,40 @@ def read_nifti_mrs(path: Union[str, Sequence[str]]) -> Signals:
     return _read_single_nifti_mrs(path)
 
 
+def _is_nifti_mrs(obj) -> bool:
+    """Whether obj is a NIfTI-MRS object, or a batched wrapper of them.
+
+    Recognised by what it exposes rather than by its type: FSL-MRS subclasses NIFTI_MRS
+    and NIfTI-MRS+ wraps a list of them, and neither is importable from here.
+    """
+    if hasattr(obj, "list") and hasattr(obj, "dwelltime"):
+        return True
+    return all(hasattr(obj, a) for a in
+               ("dwelltime", "spectrometer_frequency", "__getitem__", "shape"))
+
+
+def from_nifti_mrs(nmrs) -> Signals:
+    """Build Signals from an already-loaded NIfTI-MRS object.
+
+    Accepts a "nifti_mrs.NIFTI_MRS", anything subclassing it (FSL-MRS extends it), or a
+    batched wrapper exposing "list()", such as NIfTI-MRS+. Writing the object out and
+    reading it back would lose nothing, but it would send data that is already in
+    memory on a round trip through disk.
+    """
+    if hasattr(nmrs, "list"):                  # a batched wrapper, e.g. NIfTI-MRS+
+        sigs = [from_nifti_mrs(one) for one in nmrs.list()]
+        if not sigs:
+            raise ValueError("from_nifti_mrs received an empty batch.")
+        n_points = sigs[0].fids.shape[-1]
+        for s in sigs:
+            if s.fids.shape[-1] != n_points:
+                raise ValueError(f"NIfTI-MRS objects have mismatched point counts: "
+                                 f"{n_points} vs {s.fids.shape[-1]}.")
+        return Signals(fids=np.concatenate([s.fids for s in sigs], axis=0),
+                       dwell=sigs[0].dwell, central_freq=sigs[0].central_freq)
+    return _signals_from_nifti_mrs(nmrs)
+
+
 def _read_single_nifti_mrs(path: str) -> Signals:
     """Read a single NIfTI-MRS file into a Signals object."""
     try:
@@ -102,7 +136,11 @@ def _read_single_nifti_mrs(path: str) -> Signals:
     except Exception:
         return _read_nifti_mrs_nibabel(path)
 
-    nmrs = NIFTI_MRS(path)
+    return _signals_from_nifti_mrs(NIFTI_MRS(path))
+
+
+def _signals_from_nifti_mrs(nmrs) -> Signals:
+    """Pull the FIDs and acquisition parameters out of a NIfTI-MRS object."""
     data = np.asarray(nmrs[:])                 # complex, spectral axis at index 3
     if not np.iscomplexobj(data):
         data = data.astype(np.complex64)
@@ -255,6 +293,10 @@ def load_signals(data, domain: str = "time", dwell: Optional[float] = None,
         isinstance(p, str) and p.lower().endswith((".nii", ".nii.gz")) for p in data
     ):
         sig = read_nifti_mrs(list(data))
+    elif _is_nifti_mrs(data):
+        # already loaded: keep its dwell time and central frequency rather than making
+        # the caller re-supply what the object already knows
+        sig = from_nifti_mrs(data)
     else:
         sig = Signals(fids=_normalize_array(data))
 

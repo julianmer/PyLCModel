@@ -6,7 +6,7 @@
 #                                                                                                  #
 # Created: 26/06/26                                                                                #
 #                                                                                                  #
-# Purpose: Generation and adjustment of LCModel control files. A control file is a list of           #
+# Purpose: Generation and adjustment of LCModel control files. A control file is a list of         #
 #          "key=value" lines wrapped in "$LCMODL ... $END". See the LCModel manual for the full    #
 #          parameter reference: http://s-provencher.com/pub/LCModel/manual/manual.pdf              #
 #                                                                                                  #
@@ -72,9 +72,9 @@ def build_control(path2basis: str, n_points: int, bandwidth: float, central_freq
     return lines
 
 
-#*************************#
+#**************************#
 #   load + override file   #
-#*************************#
+#**************************#
 def load_control(control_path: str, path2basis: str, ppmlim: Tuple[float, float],
                  ignore=DEFAULT_IGNORE) -> List[str]:
     """Read an existing control file and override basis, ppm limits and ignored metabolites."""

@@ -1,0 +1,334 @@
+####################################################################################################
+# Builds portable LCModel binaries and a container image from the pinned upstream source.
+#
+#   linux  x86_64 / aarch64  - fully static, built in docker/Dockerfile
+#   macOS  x86_64 / arm64    - libgfortran/libgcc linked statically, built directly on the runner
+#   image  ghcr.io/<owner>/lcmodel  - the Linux binary as a multi-arch image (amd64 + arm64)
+#
+# Upstream (schorschinho/LCModel) ships no aarch64 Linux build, and its macOS builds link the
+# builder's Homebrew libgfortran dynamically, so an M1 build fails on an M4 machine with a
+# different Homebrew layout. These artifacts close both gaps. They are meant to be offered
+# upstream first; the release here is what PyLCModel falls back to in the meantime.
+#
+# Native runners on purpose: compiling LCModel.f (600 KB of -O3 Fortran with ~350 MB of
+# static data) under QEMU takes 30-60+ minutes and is memory-hostile. The image is therefore
+# pushed per architecture by digest and merged into one manifest afterwards.
+#
+# Publishing (image push, release) happens only for a version tag ("v0.3.0" - the same tag
+# as the PyPI release; lcmodel_wrapper/_version.py is the source of truth) or a manual run.
+# Pull requests and the monthly drift check build and test but never publish.
+####################################################################################################
+
+name: lcmodel-binaries
+
+on:
+  push:
+    tags: ['v[0-9]*']
+    paths:
+      - 'docker/**'
+      - '.github/workflows/lcmodel-binaries.yml'
+  pull_request:
+    paths:
+      - 'docker/**'
+      - '.github/workflows/lcmodel-binaries.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 1 * *'   # monthly, to catch upstream source drift via the checksum step
+
+permissions:
+  contents: read
+
+env:
+  # Pinned upstream commit. Bumping this changes the numerics, so it is a deliberate,
+  # reviewable edit - keep it in step with docker/lcmodel-src.sha256.
+  LCMODEL_REF: c9d95ff9b1fd2e7e8b256088ba1f5cf4df5fb207
+  # Must be lowercase for the registry; the owner login already is.
+  IMAGE: ghcr.io/${{ github.repository_owner }}/lcmodel
+  PUBLISH: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+
+jobs:
+  #------------------------------------------------------------------------------------------#
+  #  Linux: static binary via the Dockerfile, plus the per-arch image                         #
+  #------------------------------------------------------------------------------------------#
+  linux:
+    name: linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            platform: arm64
+            runner: ubuntu-24.04-arm    # native ARM runner; no QEMU
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build LCModel
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: LCMODEL_REF=${{ env.LCMODEL_REF }}
+          load: true
+          tags: lcmodel-build:${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Extract the binary
+        run: |
+          # "docker create" never runs the entrypoint, so this works on a scratch image
+          # with no shell.
+          cid=$(docker create lcmodel-build:${{ matrix.arch }})
+          docker cp "$cid:/usr/local/bin/lcmodel" ./lcmodel
+          docker cp "$cid:/licenses/LICENSE.lcmodel" ./LICENSE.lcmodel
+          docker cp "$cid:/licenses/NOTICE" ./NOTICE.lcmodel
+          docker rm "$cid"
+          chmod +x ./lcmodel
+          file ./lcmodel
+          ls -lh ./lcmodel
+
+      - name: Smoke test
+        run: ./docker/smoke-test.sh ./lcmodel "${LCMODEL_REF}"
+
+      - name: Smoke test through the image
+        # What a PyLCModel user on Docker actually runs: stdin in, output files out,
+        # working directory bind-mounted at the same path, non-root uid.
+        run: |
+          work=$(mktemp -d)
+          raw="https://raw.githubusercontent.com/schorschinho/LCModel/${LCMODEL_REF}/test_lcm"
+          for f in 3t.basis control.file data.raw; do
+            curl -fsSL --retry 3 -o "$work/$f" "$raw/$f"
+          done
+          docker run --rm -i -u "$(id -u):$(id -g)" -v "$work:$work" -w "$work" \
+            lcmodel-build:${{ matrix.arch }} < "$work/control.file" | tail -3
+          [ -s "$work/out.ps" ] || { echo "no output from container run" >&2; exit 1; }
+          [ "$(stat -c %u "$work/out.ps")" = "$(id -u)" ] \
+            || { echo "output not owned by the caller" >&2; exit 1; }
+          echo "container smoke test ok"
+
+      - name: Compress
+        run: |
+          # ~113 MB raw, but almost all of it is zero-initialised Fortran DATA, so it
+          # compresses to a few hundred KB.
+          xz -9 -k -c ./lcmodel > "lcmodel-linux-${{ matrix.arch }}.xz"
+          ls -lh "lcmodel-linux-${{ matrix.arch }}.xz"
+          sha256sum "lcmodel-linux-${{ matrix.arch }}.xz" \
+            | tee "lcmodel-linux-${{ matrix.arch }}.xz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lcmodel-linux-${{ matrix.arch }}
+          path: |
+            lcmodel-linux-${{ matrix.arch }}.xz
+            lcmodel-linux-${{ matrix.arch }}.xz.sha256
+            LICENSE.lcmodel
+            NOTICE.lcmodel
+          retention-days: 14
+
+      #-- image publishing (tag / manual runs only) --------------------------------------#
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the image by digest
+        if: env.PUBLISH == 'true'
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: LCMODEL_REF=${{ env.LCMODEL_REF }}
+          platforms: linux/${{ matrix.platform }}
+          # Untagged push; the "image" job below stitches both digests into one manifest.
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+
+      - name: Export the digest
+        if: env.PUBLISH == 'true'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: env.PUBLISH == 'true'
+        with:
+          name: digests-${{ matrix.platform }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  #------------------------------------------------------------------------------------------#
+  #  macOS: built directly on the runner, libgfortran linked statically                       #
+  #------------------------------------------------------------------------------------------#
+  macos:
+    name: macos ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14            # oldest arm64 image: oldest SDK, widest reach
+            deployment_target: '12.0'   # Monterey, the first macOS upstream ever built for
+          - arch: x86_64
+            runner: macos-15-intel
+            deployment_target: '10.15'  # Catalina, matching upstream's Intel build
+    env:
+      FC: gfortran-14
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the pinned upstream source
+        run: |
+          mkdir -p src && cd src
+          raw="https://raw.githubusercontent.com/schorschinho/LCModel/${LCMODEL_REF}/source"
+          for f in LCModel.f lcmodel.inc lipid-1.inc liver-1.inc muscle-1.inc \
+                   nml_lcmodel.inc nml_lcmodl.inc; do
+            curl -fsSL --retry 3 --retry-delay 2 -o "$f" "$raw/$f"
+          done
+          shasum -a 256 -c ../docker/lcmodel-src.sha256
+
+      - name: Compile
+        working-directory: src
+        run: |
+          "$FC" --version | head -1
+          # Same flags as upstream's Makefile so the numerics match the community builds.
+          "$FC" -c -fno-backslash -fno-f2c -O3 -fall-intrinsics -std=legacy \
+                -Wuninitialized -ffpe-summary=none LCModel.f -o LCModel.o
+          # -static-libgfortran covers libgfortran; libquadmath (x86_64 only) needs the
+          # archive named explicitly or it stays a Homebrew dylib dependency.
+          extra=""
+          quad="$("$FC" -print-file-name=libquadmath.a)"
+          [ -f "$quad" ] && extra="$quad"
+          "$FC" -static-libgfortran -static-libgcc LCModel.o $extra -o lcmodel
+          cp lcmodel ../lcmodel
+
+      - name: Check portability
+        run: |
+          # The whole point of this job: nothing may resolve to the builder's Homebrew.
+          otool -L ./lcmodel
+          if otool -L ./lcmodel | grep -qE '/(opt/homebrew|usr/local)/'; then
+            echo "binary still links a Homebrew library" >&2; exit 1
+          fi
+          otool -l ./lcmodel | grep -A3 -E 'LC_BUILD_VERSION|LC_VERSION_MIN' | grep -E 'minos|version' || true
+          # LCModel exits 0 even on fatal errors (Fortran STOP), so assert on output.
+          ./lcmodel < /dev/null 2>&1 | grep -q 'MYCONT' \
+            || { echo "binary does not identify itself as LCModel" >&2; exit 1; }
+          echo "self-test ok"
+
+      - name: Smoke test
+        run: ./docker/smoke-test.sh ./lcmodel "${LCMODEL_REF}"
+
+      - name: Compress
+        run: |
+          command -v xz >/dev/null || brew install xz
+          xz -9 -k -c ./lcmodel > "lcmodel-macos-${{ matrix.arch }}.xz"
+          ls -lh "lcmodel-macos-${{ matrix.arch }}.xz"
+          shasum -a 256 "lcmodel-macos-${{ matrix.arch }}.xz" \
+            | tee "lcmodel-macos-${{ matrix.arch }}.xz.sha256"
+          cp NOTICE NOTICE.lcmodel   # LICENSE.lcmodel is already at the repo root
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lcmodel-macos-${{ matrix.arch }}
+          path: |
+            lcmodel-macos-${{ matrix.arch }}.xz
+            lcmodel-macos-${{ matrix.arch }}.xz.sha256
+            LICENSE.lcmodel
+            NOTICE.lcmodel
+          retention-days: 14
+
+  #------------------------------------------------------------------------------------------#
+  #  merge the per-arch image digests into one multi-arch tag                                 #
+  #------------------------------------------------------------------------------------------#
+  image:
+    name: publish multi-arch image
+    needs: linux
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the manifest
+        working-directory: /tmp/digests
+        run: |
+          # A tag push gets its own tag plus "latest"; a manual run only "edge", so that
+          # what PyLCModel pulls by default (the release tag) is never moved by hand.
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            tags=("${GITHUB_REF#refs/tags/}" latest)
+          else
+            tags=(edge)
+          fi
+          args=()
+          for t in "${tags[@]}"; do args+=(-t "${IMAGE}:${t}"); done
+          docker buildx imagetools create "${args[@]}" $(printf "${IMAGE}@sha256:%s " *)
+          docker buildx imagetools inspect "${IMAGE}:${tags[0]}"
+
+  #------------------------------------------------------------------------------------------#
+  #  attach every binary to the release                                                       #
+  #------------------------------------------------------------------------------------------#
+  release:
+    name: attach to release
+    needs: [linux, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: lcmodel-*
+          merge-multiple: true
+
+      - run: ls -lhR dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body: |
+            PyLCModel ${{ github.ref_name }} (`pip install lcmodel-wrapper`).
+
+            Attached: portable LCModel binaries built from upstream source
+            `${{ env.LCMODEL_REF }}`, unmodified, which this version of the wrapper
+            downloads on demand when no community binary fits the machine:
+
+            - `lcmodel-linux-x86_64.xz`, `lcmodel-linux-aarch64.xz` - fully static
+            - `lcmodel-macos-arm64.xz` (macOS 12+), `lcmodel-macos-x86_64.xz` (macOS 10.15+)
+              - libgfortran linked statically, no Homebrew needed
+            - container image: `${{ env.IMAGE }}:${{ github.ref_name }}` (linux/amd64, linux/arm64)
+
+            Each `.xz` has a `.sha256` sidecar; PyLCModel verifies it before use.
+
+            LCModel is a separate BSD-3-Clause program by Stephen Provencher.
+            See `LICENSE.lcmodel` attached here and on the
+            [LCModel home page](https://s-provencher.com/lcmodel.shtml).

@@ -13,8 +13,9 @@ dist/
 *.egg-info/
 .eggs/
 
-# Test artifacts
+# Test artifacts and the wrapper's default working directory
 tests/tmp/
+tmp/
 
 # System
 .DS_Store

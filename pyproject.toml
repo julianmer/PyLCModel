@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lcmodel_wrapper"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Lightweight Python wrapper for LCModel MRS fitting"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,8 +14,9 @@ authors = [
   { name = "Julian Merkofer", email = "j.p.merkofer@tue.nl" }
 ]
 
-# Core stays light. LCModel binaries are downloaded on demand from
-# https://github.com/schorschinho/LCModel (or built from source via gfortran).
+# Core stays light: no LCModel code or binary in the wheel. One is resolved on first
+# use - downloaded from https://github.com/schorschinho/LCModel or this repo's
+# releases, run from the ghcr.io/julianmer/lcmodel image, or built via gfortran.
 dependencies = [
   "numpy>=1.22",
   "scipy>=1.10",
@@ -24,7 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pandas>=1.4", "openpyxl>=3.0"]
+test = ["pytest>=7.0", "pandas>=1.4", "openpyxl>=3.0"]
 
 [project.urls]
 Homepage = "https://github.com/julianmer/PyLCModel"
@@ -32,6 +33,9 @@ Repository = "https://github.com/julianmer/PyLCModel"
 
 [tool.setuptools]
 package-dir = {"" = "."}
+
+[tool.setuptools.dynamic]
+version = { attr = "lcmodel_wrapper._version.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["."]

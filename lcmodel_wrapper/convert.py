@@ -9,10 +9,10 @@
 # Purpose: Best-effort conversion of common MRS basis-set formats to the LCModel ".basis" format,  #
 #          inspired by the MRS Basis Set Conversion Toolbox                                        #
 #          (https://github.com/igweckay/MRS-Basis-Set-Conversion-Toolbox). Supported inputs:       #
-#          an existing ".basis" file (pass-through), a jMRUI/AQSES/QUEST ".txt" folder, an          #
+#          an existing ".basis" file (pass-through), a jMRUI/AQSES/QUEST ".txt" folder, an         #
 #          FSL-MRS ".json" folder, an LCModel ".RAW" folder, and an Osprey/FID-A ".mat" struct.    #
 #          The output is NOT independently validated against LCModel makebasis -- verify your      #
-#          fits.                                                                                    #
+#          fits.                                                                                   #
 #                                                                                                  #
 ####################################################################################################
 
@@ -28,9 +28,9 @@ from .io import read_jmrui_txt, jmrui_metadata
 
 
 
-#************************#
-#   .basis writer        #
-#************************#
+#*******************#
+#   .basis writer   #
+#*******************#
 def _fmt_block(values: np.ndarray) -> str:
     """Format a flat float array as Fortran "(6E13.5)" lines."""
     out = []
@@ -74,9 +74,9 @@ def write_basis(out_path: str, names: List[str], fids: List[np.ndarray],
     return out_path
 
 
-#*****************************#
-#   parsed-basis container     #
-#*****************************#
+#****************************#
+#   parsed-basis container   #
+#****************************#
 class ParsedBasis(NamedTuple):
     names: List[str]
     fids: List[np.ndarray]
@@ -150,9 +150,9 @@ def _read_fsl_folder(folder: str) -> ParsedBasis:
     return ParsedBasis(names, fids, dwell, central, None)
 
 
-#*****************************#
-#   LCModel .RAW folder        #
-#*****************************#
+#*************************#
+#   LCModel .RAW folder   #
+#*************************#
 _NUM_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eEdD][-+]?\d+)?")
 
 
