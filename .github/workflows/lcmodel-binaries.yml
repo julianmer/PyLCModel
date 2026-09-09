@@ -14,22 +14,29 @@
 # static data) under QEMU takes 30-60+ minutes and is memory-hostile. The image is therefore
 # pushed per architecture by digest and merged into one manifest afterwards.
 #
+# Every push to main and every pull request that touches the build inputs builds and tests.
 # Publishing (image push, release) happens only for a version tag ("v0.3.0" - the same tag
 # as the PyPI release; lcmodel_wrapper/_version.py is the source of truth) or a manual run.
-# Pull requests and the monthly drift check build and test but never publish.
 ####################################################################################################
 
 name: lcmodel-binaries
 
 on:
   push:
+    branches: [main]
     tags: ['v[0-9]*']
     paths:
       - 'docker/**'
+      - 'lcmodel_wrapper/**'
+      - 'tests/**'
+      - 'example_data/**'
       - '.github/workflows/lcmodel-binaries.yml'
   pull_request:
     paths:
       - 'docker/**'
+      - 'lcmodel_wrapper/**'
+      - 'tests/**'
+      - 'example_data/**'
       - '.github/workflows/lcmodel-binaries.yml'
   workflow_dispatch:
   schedule:
@@ -45,6 +52,8 @@ env:
   # Must be lowercase for the registry; the owner login already is.
   IMAGE: ghcr.io/${{ github.repository_owner }}/lcmodel
   PUBLISH: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+  # No ".dockerbuild" debug artifacts on every run
+  DOCKER_BUILD_RECORD_UPLOAD: false
 
 jobs:
   #------------------------------------------------------------------------------------------#
