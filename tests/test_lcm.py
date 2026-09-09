@@ -3,19 +3,36 @@
 ####################################################################################################
 #                                                                                                  #
 # Purpose: End-to-end test of the PyLCModel wrapper by fitting MRS data from the ISMRM 2016        #
-#          fitting challenge (jMRUI datasets + .basis), without any fsl_mrs dependency.            #
+#          fitting challenge (jMRUI datasets + .basis) and comparing against the ground truth.     #
+#                                                                                                  #
+#          The same run doubles as the acceptance test for every LCModel binary CI builds: point   #
+#          LCMODEL_EXEC at a binary (or at the container launcher) and the fit must reproduce the  #
+#          reference error. LCModel exits 0 even on fatal errors, so this - not a return code -    #
+#          is what proves a build works.                                                           #
 #                                                                                                  #
 ####################################################################################################
 
 import os
 import re
+import sys
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
+import pytest
 
-from lcmodel_wrapper import PyLCModel
-from lcmodel_wrapper import io
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+
+from lcmodel_wrapper import PyLCModel, io
+
+_REPO = Path(__file__).resolve().parent.parent
+_CHALLENGE = _REPO / "example_data" / "2016_fitting_challenge"
+_TRUTH = _REPO / "example_data" / "2016_fitting_challenge_gts"
+
+# Mean absolute concentration error over the first five datasets, from the native
+# macOS arm64 build. Every build must land here; a miscompiled binary either raises
+# (no .coord) or is off by orders of magnitude, so the tolerance can stay tight.
+REFERENCE_MAE = 1.609
+TOLERANCE = 0.02
 
 
 #*************#
@@ -23,6 +40,7 @@ from lcmodel_wrapper import io
 #*************#
 def load_EXCEL_conc(path2conc: Path):
     """Load ISMRM-2016 ground-truth concentrations -> sorted {metabolite: concentration}."""
+    import pandas as pd
     truth = {"Ace": 0.0}  # Ace is only partially present
     df = pd.read_excel(str(path2conc), header=17)
     for met, val in zip(df["Metabolites"], df["concentration"]):
@@ -34,69 +52,41 @@ def load_EXCEL_conc(path2conc: Path):
     return dict(sorted(truth.items()))
 
 
-#*********#
-#   main  #
-#*********#
-def main():
-    repo_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    example_data = os.path.join(repo_root, "example_data")
-    challenge = os.path.join(example_data, "2016_fitting_challenge")
+#***********#
+#   fitting #
+#***********#
+def challenge_mae(test_size: int = 5) -> float:
+    """Fit the first "test_size" challenge datasets and return the MAE against the truth."""
+    basis = _CHALLENGE / "basisset_LCModel" / "press3T_30ms.BASIS"
+    data_dir = _CHALLENGE / "datasets_JMRUI"
 
-    config = {
-        "path2basis": os.path.join(challenge, "basisset_LCModel", "press3T_30ms.BASIS"),
-        "path2concs": os.path.join(example_data, "2016_fitting_challenge_gts"),
-        "path2data": os.path.join(challenge, "datasets_JMRUI"),
-        "path2save": None,
-        "test_size": 5,
-        "sample_points": 2048,
-    }
-
-    if not os.path.exists(config["path2basis"]):
-        raise FileNotFoundError(
-            "ISMRM 2016 fitting challenge data not found. Initialize the submodule with:\n"
-            "  git submodule update --init"
-        )
-    for key in ("path2concs", "path2data"):
-        if not os.path.exists(config[key]):
-            raise FileNotFoundError(f"{key} not found: {config[key]}")
-
-    # initialize model (binary is resolved automatically; data is time-domain FIDs)
-    lcm = PyLCModel(
-        path2basis=config["path2basis"],
-        sample_points=config["sample_points"],
-        domain="time",
-    )
-    basis_names = lcm.basis.names
+    lcm = PyLCModel(path2basis=str(basis), sample_points=2048, domain="time")
     n_metabs = lcm.basis.n_metabs
 
     # pair ground truths with challenge datasets by dataset number
     conc_by_num = {
         int(re.search(r"dataset(\d+)", p.stem).group(1)): p
-        for p in Path(config["path2concs"]).iterdir()
-        if p.suffix in (".xlsx", ".xls")
+        for p in _TRUTH.iterdir() if p.suffix in (".xlsx", ".xls")
     }
-    numbers = sorted(conc_by_num)[: config["test_size"]]
+    numbers = sorted(conc_by_num)[:test_size]
 
-    # ground truth
-    concs_list = [load_EXCEL_conc(conc_by_num[n]) for n in numbers]
-    concs = np.array([[c.get(met, 0.0) for met in basis_names] for c in concs_list])[:, :n_metabs]
+    truth = [load_EXCEL_conc(conc_by_num[n]) for n in numbers]
+    concs = np.array([[t.get(m, 0.0) for m in lcm.basis.names] for t in truth])[:, :n_metabs]
 
-    # data: jMRUI FIDs (time domain), water-suppressed (WS) and water reference (nWS)
-    data_dir = Path(config["path2data"])
-    data = np.array(
-        [io.read_jmrui(str(data_dir / f"dataset{n}_WS.txt")).fids[0] for n in numbers]
-    )
-    water = np.array(
-        [io.read_jmrui(str(data_dir / f"dataset{n}_nWS.txt")).fids[0] for n in numbers]
-    )
+    # water-suppressed (WS) and water reference (nWS) FIDs, time domain
+    data = np.array([io.read_jmrui(str(data_dir / f"dataset{n}_WS.txt")).fids[0] for n in numbers])
+    water = np.array([io.read_jmrui(str(data_dir / f"dataset{n}_nWS.txt")).fids[0] for n in numbers])
 
-    # fit
-    lcm.set_save_path(config["path2save"])
-    thetas, uncs = lcm(data, water)
+    thetas, _ = lcm(data, water)
+    return float(lcm.concsLoss(concs, thetas, type="ae").mean())
 
-    loss = lcm.concsLoss(concs, thetas, type="ae")
-    print("MAE:", float(loss.mean()))
+
+@pytest.mark.skipif(not _CHALLENGE.is_dir() or not _TRUTH.is_dir(),
+                    reason="challenge data not checked out (git submodule update --init)")
+def test_challenge_fit_matches_reference():
+    mae = challenge_mae()
+    assert abs(mae - REFERENCE_MAE) < TOLERANCE, f"MAE {mae:.4f} vs reference {REFERENCE_MAE}"
 
 
 if __name__ == "__main__":
-    main()
+    print("MAE:", challenge_mae())

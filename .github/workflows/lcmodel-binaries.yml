@@ -68,6 +68,8 @@ jobs:
             runner: ubuntu-24.04-arm    # native ARM runner; no QEMU
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: docker/setup-buildx-action@v3
 
@@ -95,24 +97,25 @@ jobs:
           file ./lcmodel
           ls -lh ./lcmodel
 
-      - name: Smoke test
-        run: ./docker/smoke-test.sh ./lcmodel "${LCMODEL_REF}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-      - name: Smoke test through the image
-        # What a PyLCModel user on Docker actually runs: stdin in, output files out,
-        # working directory bind-mounted at the same path, non-root uid.
+      - name: Install the wrapper
+        run: pip install -q -e '.[test]'
+
+      - name: Fit the challenge data with the new binary
+        # The acceptance test: LCModel exits 0 even on fatal errors, so only a fit that
+        # reproduces the reference error proves the build is good.
+        run: LCMODEL_EXEC="$PWD/lcmodel" python -m pytest tests/test_lcm.py -q
+
+      - name: Fit the challenge data through the image
+        # Exactly what a Docker user runs: the launcher from binaries.py in front of the
+        # image, working directory bind-mounted, non-root uid.
         run: |
-          work=$(mktemp -d)
-          raw="https://raw.githubusercontent.com/schorschinho/LCModel/${LCMODEL_REF}/test_lcm"
-          for f in 3t.basis control.file data.raw; do
-            curl -fsSL --retry 3 -o "$work/$f" "$raw/$f"
-          done
-          docker run --rm -i -u "$(id -u):$(id -g)" -v "$work:$work" -w "$work" \
-            lcmodel-build:${{ matrix.arch }} < "$work/control.file" | tail -3
-          [ -s "$work/out.ps" ] || { echo "no output from container run" >&2; exit 1; }
-          [ "$(stat -c %u "$work/out.ps")" = "$(id -u)" ] \
-            || { echo "output not owned by the caller" >&2; exit 1; }
-          echo "container smoke test ok"
+          launcher=$(python -c "from pathlib import Path; from lcmodel_wrapper import binaries; \
+            print(binaries._write_shim(Path.cwd(), 'docker', 'lcmodel-build:${{ matrix.arch }}'))")
+          LCMODEL_EXEC="$launcher" python -m pytest tests/test_lcm.py -q
 
       - name: Compress
         run: |
@@ -191,6 +194,8 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Fetch the pinned upstream source
         run: |
@@ -209,12 +214,12 @@ jobs:
           # Same flags as upstream's Makefile so the numerics match the community builds.
           "$FC" -c -fno-backslash -fno-f2c -O3 -fall-intrinsics -std=legacy \
                 -Wuninitialized -ffpe-summary=none LCModel.f -o LCModel.o
-          # -static-libgfortran covers libgfortran; libquadmath (x86_64 only) needs the
-          # archive named explicitly or it stays a Homebrew dylib dependency.
-          extra=""
-          quad="$("$FC" -print-file-name=libquadmath.a)"
-          [ -f "$quad" ] && extra="$quad"
-          "$FC" -static-libgfortran -static-libgcc LCModel.o $extra -o lcmodel
+          # -static-libgfortran covers libgfortran but the driver still adds -lquadmath,
+          # and Apple's linker prefers the .dylib when it sits beside the .a. A private
+          # directory holding only the archive, searched first, is the standard fix.
+          mkdir -p static
+          cp "$("$FC" -print-file-name=libquadmath.a)" static/
+          "$FC" -static-libgfortran -static-libgcc -L"$PWD/static" LCModel.o -o lcmodel
           cp lcmodel ../lcmodel
 
       - name: Check portability
@@ -230,8 +235,15 @@ jobs:
             || { echo "binary does not identify itself as LCModel" >&2; exit 1; }
           echo "self-test ok"
 
-      - name: Smoke test
-        run: ./docker/smoke-test.sh ./lcmodel "${LCMODEL_REF}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the wrapper
+        run: pip install -q -e '.[test]'
+
+      - name: Fit the challenge data with the new binary
+        run: LCMODEL_EXEC="$PWD/lcmodel" python -m pytest tests/test_lcm.py -q
 
       - name: Compress
         run: |

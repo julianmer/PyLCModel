@@ -422,7 +422,7 @@ def _download_release_binary(cache: Path) -> Optional[Path]:
 
     Unlike the upstream files these carry a checksum sidecar, and it is enforced: a
     release asset is a plain URL anyone could re-upload, so the hash is what ties the
-    file to the CI run that built and smoke-tested it.
+    file to the CI run that built and tested it.
     """
     assets = _release_assets()
     if not assets:
@@ -663,7 +663,10 @@ def resolve_executable(path2exec: Optional[str] = None,
 
     Raises "RuntimeError" if no executable can be obtained.
     """
-    # 1. explicit user path - verified, but never silently replaced
+    # 1. explicit user path - verified, but never silently replaced. The environment
+    #    variable is the same thing for code that does not pass the argument (CI
+    #    pointing the test suite at a freshly built binary, a cluster-wide install).
+    path2exec = path2exec or os.environ.get("LCMODEL_EXEC")
     if path2exec:
         p = Path(path2exec).expanduser()
         if not p.is_file():

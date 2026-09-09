@@ -14,7 +14,7 @@
 # See /licenses inside the image, and LICENSE.lcmodel in this repository.
 #
 # Build:
-#   docker build -f docker/Dockerfile --build-arg LCMODEL_REF=<sha> -t lcmodel-build .
+#   docker build -f docker/dockerfile --build-arg LCMODEL_REF=<sha> -t lcmodel-build .
 # Extract:
 #   cid=$(docker create lcmodel-build) \
 #     && docker cp "$cid:/usr/local/bin/lcmodel" ./lcmodel && docker rm "$cid"
