@@ -162,7 +162,7 @@ _NUM_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eEdD][-+]?\d+)?")
 
 def _read_raw_file(path: str) -> Tuple[np.ndarray, Dict[str, str]]:
     keys: Dict[str, str] = {}
-    rows = []
+    values = []
     with open(path, "r", errors="ignore") as fh:
         for line in fh:
             s = line.strip()
@@ -172,10 +172,11 @@ def _read_raw_file(path: str) -> Tuple[np.ndarray, Dict[str, str]]:
                 key, _, val = s.partition("=")
                 keys[key.strip().upper()] = val.strip().rstrip(",").strip().strip("'")
                 continue
+            # FMTDAT may put several (real, imag) pairs on a line, e.g. '(8E13.5)'
             nums = _NUM_RE.findall(s.replace("D", "E").replace("d", "e"))
-            if len(nums) >= 2:
-                rows.append(float(nums[0]) + 1j * float(nums[1]))
-    return np.asarray(rows, dtype=np.complex128), keys
+            values.extend(float(v) for v in nums)
+    values = np.asarray(values[:len(values) // 2 * 2], dtype=np.float64)
+    return values[0::2] + 1j * values[1::2], keys
 
 
 def _read_raw_folder(folder: str) -> ParsedBasis:
