@@ -40,8 +40,14 @@ def _fmt_block(values: np.ndarray) -> str:
 
 def write_basis(out_path: str, names: List[str], fids: List[np.ndarray],
                 dwell: float, central_freq: float, echo_time: float = -1.0) -> str:
-    """Write metabolite FIDs to an LCModel ".basis" file (experimental)."""
-    n_points = len(fids[0])
+    """Write metabolite FIDs to an LCModel ".basis" file (experimental).
+
+    LCModel reads the data block of a ".basis" as the frequency-domain spectrum
+    (BASISF in LCModel.f), which MakeBasis writes as the orthonormal FFT of the FID
+    zero-filled to twice its length (NDATAB = 2 * NUNFIL). The FIDs are expected in
+    LCModel's ".RAW" orientation.
+    """
+    n_points = 2 * len(fids[0])
     with open(out_path, "w") as fh:
         fh.write(" $SEQPAR\n")
         fh.write(" FWHMBA = -1.,\n")
@@ -65,9 +71,10 @@ def write_basis(out_path: str, names: List[str], fids: List[np.ndarray],
             fh.write(" VOLUME = 1.,\n")
             fh.write(" ISHIFT = 0\n")
             fh.write(" $END\n")
+            spec = np.fft.fft(np.asarray(fid, dtype=complex), n=n_points, norm="ortho")
             interleaved = np.empty(2 * n_points, dtype=np.float64)
-            interleaved[0::2] = np.real(fid)
-            interleaved[1::2] = np.imag(fid)
+            interleaved[0::2] = np.real(spec)
+            interleaved[1::2] = np.imag(spec)
             fh.write(_fmt_block(interleaved) + "\n")
     return out_path
 
