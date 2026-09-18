@@ -122,7 +122,8 @@ def _read_jmrui_folder(folder: str) -> ParsedBasis:
         dwell = dwell if dwell is not None else d
         central = central if central is not None else c
         names.append(os.path.splitext(f)[0])
-        fids.append(fid)
+        # jMRUI stores the conjugate of LCModel's .RAW orientation
+        fids.append(np.conj(fid))
     return ParsedBasis(names, fids, dwell, central, None)
 
 
