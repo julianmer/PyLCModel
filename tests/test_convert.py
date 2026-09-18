@@ -53,3 +53,22 @@ def test_conversion_matches_makebasis(tmp_path, fmt, folder):
         assert converted[name].shape == spectrum.shape, name
         err = np.abs(converted[name] - spectrum).max() / np.abs(spectrum).max()
         assert err < 1e-3, f"{name}: {err:.2e}"
+
+
+def read_ppmsep(path) -> list:
+    """The PPMSEP stated before every metabolite, in file order."""
+    text = Path(path).read_text()
+    return [float(v) for v in re.findall(r"PPMSEP\s*=\s*([-+.\dEe]+)", text)]
+
+
+def test_every_metabolite_states_its_centre_like_makebasis(tmp_path):
+    """MakeBasis puts PPMSEP in a $NMUSED block before each metabolite; Osprey's reader
+    takes its ppm axis from it."""
+    reference = read_ppmsep(_MAKEBASIS)
+    out = convert_to_basis(str(_CHALLENGE / "basisset_LCModel"),
+                           out_path=str(tmp_path / "converted.basis"), fmt="raw",
+                           dwell=2.5e-4, central_freq=123.261703)
+
+    assert len(set(reference)) == 1
+    assert read_ppmsep(out) == pytest.approx(reference[:1] * len(read_basis_spectra(out)))
+

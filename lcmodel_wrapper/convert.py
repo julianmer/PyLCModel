@@ -39,13 +39,18 @@ def _fmt_block(values: np.ndarray) -> str:
 
 
 def write_basis(out_path: str, names: List[str], fids: List[np.ndarray],
-                dwell: float, central_freq: float, echo_time: float = -1.0) -> str:
+                dwell: float, central_freq: float, echo_time: float = -1.0,
+                centre_ppm: float = 4.65) -> str:
     """Write metabolite FIDs to an LCModel ".basis" file (experimental).
 
     LCModel reads the data block of a ".basis" as the frequency-domain spectrum
     (BASISF in LCModel.f), which MakeBasis writes as the orthonormal FFT of the FID
     zero-filled to twice its length (NDATAB = 2 * NUNFIL). The FIDs are expected in
     LCModel's ".RAW" orientation.
+
+    Like MakeBasis, every metabolite is preceded by a $NMUSED block stating the ppm at
+    the centre (PPMSEP). LCModel skips it, but Osprey's reader takes its ppm axis from
+    it and falls back to 3 ppm without it.
     """
     n_points = 2 * len(fids[0])
     with open(out_path, "w") as fh:
@@ -63,6 +68,9 @@ def write_basis(out_path: str, names: List[str], fids: List[np.ndarray],
         fh.write(" $END\n")
 
         for name, fid in zip(names, fids):
+            fh.write(" $NMUSED\n")
+            fh.write(f" PPMSEP = {centre_ppm},\n")
+            fh.write(" $END\n")
             fh.write(" $BASIS\n")
             fh.write(f" ID = '{name}',\n")
             fh.write(f" METABO = '{name}',\n")
