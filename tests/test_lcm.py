@@ -81,7 +81,9 @@ def challenge_mae(test_size: int = 5) -> float:
     return float(lcm.concsLoss(concs, thetas, type="ae").mean())
 
 
-@pytest.mark.skipif(not _CHALLENGE.is_dir() or not _TRUTH.is_dir(),
+# an uninitialised submodule is an empty directory, so look for its content
+@pytest.mark.skipif(not (_CHALLENGE / "basisset_LCModel" / "press3T_30ms.BASIS").is_file()
+                    or not any(_TRUTH.glob("*.xlsx")),
                     reason="challenge data not checked out (git submodule update --init)")
 def test_challenge_fit_matches_reference():
     mae = challenge_mae()

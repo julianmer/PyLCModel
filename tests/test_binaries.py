@@ -464,6 +464,7 @@ def test_quarantine_moves_rather_than_deletes(monkeypatch, tmp_path):
 
 def test_resolve_reports_every_source_it_tried(monkeypatch, tmp_path):
     monkeypatch.setenv("LCMODEL_CACHE_DIR", str(tmp_path))
+    monkeypatch.delenv("LCMODEL_EXEC", raising=False)   # an explicit binary would be used as is
     with pytest.raises(RuntimeError) as excinfo:
         binaries.resolve_executable(allow_download=False, allow_build=False,
                                     allow_docker=False)
