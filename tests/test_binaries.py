@@ -11,6 +11,7 @@
 
 import os
 import platform
+import shutil
 import sys
 
 import pytest
@@ -115,6 +116,19 @@ def test_probe_honours_skip_env(tmp_path, monkeypatch):
 @pytest.mark.skipif(_cached_binary() is None, reason="no cached LCModel binary")
 def test_probe_accepts_the_real_binary():
     ok, why = binaries.verify_executable(_cached_binary())
+    assert ok is True, why
+
+
+def test_probe_accepts_a_relative_path(tmp_path, monkeypatch):
+    """The probe runs the candidate in a temporary directory, so a path relative to the
+    caller's directory (a relative cache_dir or LCMODEL_EXEC) has to be resolved first."""
+    real = os.environ.get("LCMODEL_EXEC") or _cached_binary()
+    if not real:
+        pytest.skip("no LCModel binary to copy")
+    (tmp_path / "bin").mkdir()
+    shutil.copy2(real, tmp_path / "bin" / "lcmodel")
+    monkeypatch.chdir(tmp_path)
+    ok, why = binaries.verify_executable(os.path.join("bin", "lcmodel"))
     assert ok is True, why
 
 

@@ -295,7 +295,7 @@ def verify_executable(path, timeout: Optional[float] = None) -> Tuple[bool, str]
     if os.environ.get("LCMODEL_SKIP_VERIFY"):
         return True, "skipped via LCMODEL_SKIP_VERIFY"
 
-    path = Path(path)
+    path = Path(path).expanduser().resolve()   # the probe runs in a temporary directory
     try:
         st = path.stat()
         key = (str(path.resolve()), st.st_mtime_ns, st.st_size)
