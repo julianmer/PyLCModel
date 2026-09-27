@@ -104,13 +104,19 @@ class PyLCModel:
         Seconds to wait for the ".coord" output after LCModel exits. Only covers metadata
         lag on network filesystems; raises "LCModelError" with LCModel's diagnostics when
         the fit produced nothing.
+    params : dict, optional
+        Further LCModel control parameters by their control-file names, e.g.
+        {"nuse1": 2, "chuse1(1)": "NAA", "chuse1(2)": "Cr"}. Applied on top of the
+        control however it is made - built, loaded from "control", or rebuilt once the
+        data is known - so a setting or two needs no control file of its own.
     """
 
     def __init__(self, path2basis, control=None, multiprocessing=False, ppmlim=(0.5, 4.2),
                  conj=True, ignore="default", save_path="", path2exec=None,
                  domain="time", sample_points=None, bandwidth=None, central_freq=None,
                  allow_download=True, allow_docker=True, allow_build=True,
-                 convert_basis=False, basis_format=None, timeout=900, io_timeout=10):
+                 convert_basis=False, basis_format=None, timeout=900, io_timeout=10,
+                 params=None):
 
         if convert_basis:
             conv_dwell = (1.0 / bandwidth) if bandwidth else None
@@ -119,6 +125,7 @@ class PyLCModel:
             )
         self.path2basis = path2basis
         self.basis = read_basis(path2basis)
+        self.params = dict(params or {})
 
         self.multiprocessing = multiprocessing
         self.save_path = save_path
@@ -156,7 +163,8 @@ class PyLCModel:
         self._ignore = control_mod.resolve_ignore(ignore)
 
         if control is not None:
-            self.control = control_mod.load_control(control, path2basis, ppmlim, self._ignore)
+            self.control = control_mod.set_params(
+                control_mod.load_control(control, path2basis, ppmlim, self._ignore), self.params)
         else:
             self.control = self._build_control()
 
@@ -164,10 +172,11 @@ class PyLCModel:
     #   helpers   #
     #*************#
     def _build_control(self):
-        return control_mod.build_control(
+        control = control_mod.build_control(
             self.path2basis, self.sample_points, self.bandwidth, self.central_freq,
             ppmlim=self.ppmlim, ignore=self._ignore,
         )
+        return control_mod.set_params(control, self.params)
 
     def _workdir(self):
         """Directory for LCModel's input and output files, with a trailing separator.

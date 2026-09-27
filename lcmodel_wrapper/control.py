@@ -90,6 +90,24 @@ def load_control(control_path: str, path2basis: str, ppmlim: Tuple[float, float]
     return control
 
 
+#********************#
+#   set parameters   #
+#********************#
+def set_params(control: List[str], params: dict) -> List[str]:
+    """Set each of *params* in place, written as LCModel's namelist expects.
+
+    Strings are quoted unless they already are, and booleans become T or F; anything
+    else is written as it is.
+    """
+    for key, value in params.items():
+        if isinstance(value, bool):
+            value = "T" if value else "F"
+        elif isinstance(value, str) and not value.startswith("'"):
+            value = f"'{value}'"
+        set_key(control, key, value)
+    return control
+
+
 #********************************#
 #   set a key in a control set   #
 #********************************#
