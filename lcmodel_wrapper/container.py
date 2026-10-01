@@ -80,16 +80,20 @@ def translate_control(lines: List[str],
 #   mount computation  #
 #**********************#
 def posix_mounts(cwd: str, home: Optional[str]) -> List[Tuple[str, str]]:
-    """(host, container) pairs: the working directory, its physical path if that differs
-    (a symlinked cwd is reachable under both spellings), and the home directory unless
-    the cwd already lies inside it - docker refuses duplicate mount points."""
-    mounts = [(cwd, cwd)]
-    phys = os.path.realpath(cwd)
-    if phys != cwd:
-        mounts.append((phys, phys))
-    if home and not (cwd == home or cwd.startswith(home.rstrip(os.sep) + os.sep)):
-        mounts.append((home, home))
-    return mounts
+    """(host, container) pairs: the home directory and the working directory, each under
+    its own spelling and its physical one (a symlinked home is common on clusters), each
+    unless it already lies inside one before it - docker refuses a mount point twice - and
+    never "/", which docker refuses outright. The home directory stays visible as a
+    whole, since the basis set usually lives there."""
+    roots: List[str] = []
+    for path in (home, home and os.path.realpath(home), cwd, os.path.realpath(cwd)):
+        if path and path != os.sep and not _inside(path, roots):
+            roots.append(path)
+    return [(r, r) for r in roots]
+
+
+def _inside(path: str, roots: List[str]) -> bool:
+    return any(path == r or path.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
 
 
 def windows_mounts(cwd: str, home: Optional[str]) -> List[Tuple[str, str]]:
@@ -103,16 +107,14 @@ def windows_mounts(cwd: str, home: Optional[str]) -> List[Tuple[str, str]]:
 
 
 def can_see(path) -> bool:
-    """Would the launcher's mounts make "path" visible inside the container? Lets the
-    wrapper fail early with a clear message instead of LCModel reporting a missing file."""
+    """Would the launcher's mounts make "path", spelled as the wrapper hands it to LCModel
+    (absolute, unresolved), visible inside the container? Lets the wrapper fail early with
+    a clear message instead of LCModel reporting a missing file."""
     cwd, home = os.getcwd(), str(Path.home())
     if os.name == "nt":
         drive = ntpath.splitdrive(os.path.abspath(str(path)))[0].upper()
         return any(host.startswith(drive) for host, _ in windows_mounts(cwd, home))
-    p = Path(path).resolve()
-    roots = {Path(host).resolve() for host, _ in posix_mounts(cwd, home)}
-    roots.add(Path(os.environ.get("PWD", cwd)).resolve())
-    return any(p == root or root in p.parents for root in roots)
+    return _inside(os.path.abspath(path), [host for host, _ in posix_mounts(cwd, home)])
 
 
 #********************#

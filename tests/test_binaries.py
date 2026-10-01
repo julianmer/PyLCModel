@@ -282,9 +282,10 @@ def test_shim_mounts_cwd_at_the_same_path(tmp_path, monkeypatch):
     assert f"{home}:{home}" in mounts
 
 
-def test_shim_does_not_mount_home_twice(tmp_path, monkeypatch):
-    """Docker refuses duplicate mount points, so a working directory under $HOME must
-    not add a second, overlapping mount of $HOME."""
+def test_shim_mounts_home_whole_when_the_work_lies_inside_it(tmp_path, monkeypatch):
+    """Docker refuses a mount point twice, so a working directory under $HOME adds no
+    mount of its own - and $HOME stays mounted whole, so a basis set elsewhere in it is
+    still seen."""
     import subprocess
     log = tmp_path / "args.log"
     engine = _fake_engine(tmp_path, f'printf "%s\\n" "$@" > "{log}"\n')
@@ -297,8 +298,10 @@ def test_shim_does_not_mount_home_twice(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", _REPO)
     subprocess.run([str(shim)], cwd=work, check=True, stdin=subprocess.DEVNULL)
 
-    mounts = [a for a in log.read_text().splitlines() if a.startswith(str(home) + ":")]
-    assert mounts == []
+    args = log.read_text().splitlines()
+    mounts = [args[j + 1] for j, a in enumerate(args) if a == "-v"]
+    assert mounts == [f"{home}:{home}"]
+    assert args[args.index("-w") + 1] == str(work)
 
 
 def test_shim_passes_the_health_probe_when_the_container_answers(tmp_path, monkeypatch):
@@ -325,11 +328,35 @@ def test_container_can_see_only_cwd_and_home(tmp_path, monkeypatch):
         d.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.chdir(work)
-    monkeypatch.setenv("PWD", str(work))
     assert container.can_see(work / "tmp" / "temp0.raw")
     assert container.can_see(home / "basis" / "x.basis")
     assert container.can_see(home)
     assert not container.can_see(other / "x.basis")
+    # a working directory inside $HOME does not narrow what is seen to itself
+    (home / "project").mkdir()
+    monkeypatch.chdir(home / "project")
+    assert container.can_see(home / "basis" / "x.basis")
+    # a stale $PWD names no mount
+    monkeypatch.setenv("PWD", str(other))
+    assert not container.can_see(other / "x.basis")
+
+
+def test_mounts_never_include_the_root():
+    """Docker refuses '/' as a mount point (a home of '/' under some service accounts)."""
+    if os.name == "nt":
+        pytest.skip("POSIX mounts")
+    assert container.posix_mounts("/", "/") == []
+    assert container.posix_mounts("/data/run", "/") == [("/data/run", "/data/run")]
+
+
+def test_a_symlinked_home_is_mounted_under_both_spellings(tmp_path):
+    real = tmp_path / "gpfs" / "me"
+    real.mkdir(parents=True)
+    (tmp_path / "home").mkdir()
+    link = tmp_path / "home" / "me"
+    link.symlink_to(real)
+    mounts = [host for host, _ in container.posix_mounts(str(link / "run"), str(link))]
+    assert str(link) in mounts and str(real) in mounts
 
 
 def test_cached_shim_is_skipped_not_quarantined_when_engine_is_down(tmp_path, monkeypatch):
@@ -409,18 +436,22 @@ def test_run_command_windows_mounts_drives_under_host():
     assert cmd[-1] == "img:v1"
 
 
-def test_run_command_posix_uses_identical_paths():
-    cmd = container.run_command("docker", "img:v1", cwd="/data/run", home="/home/me",
+def test_run_command_posix_uses_identical_paths(tmp_path):
+    home, data = tmp_path / "home", tmp_path / "data" / "run"   # real folders: realpath is asked
+    (home / "run").mkdir(parents=True)
+    data.mkdir(parents=True)
+    cmd = container.run_command("docker", "img:v1", cwd=str(data), home=str(home),
                                 windows=False, uid=(1000, 1000))
     assert cmd[cmd.index("-u") + 1] == "1000:1000"
     mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-v"]
-    assert "/data/run:/data/run" in mounts and "/home/me:/home/me" in mounts
-    assert cmd[cmd.index("-w") + 1] == "/data/run"
+    assert mounts == [f"{home}:{home}", f"{data}:{data}"]
+    assert cmd[cmd.index("-w") + 1] == str(data)
     # podman: uid mapping via user namespace instead of -u
-    cmd = container.run_command("podman", "img", cwd="/home/me/run", home="/home/me",
+    cmd = container.run_command("podman", "img", cwd=str(home / "run"), home=str(home),
                                 windows=False, uid=(1000, 1000))
     assert "--userns=keep-id" in cmd and "-u" not in cmd
-    assert [c for c in cmd if c.startswith("/home/me:")] == []   # cwd inside home: no 2nd mount
+    mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-v"]
+    assert mounts == [f"{home}:{home}"]                          # cwd inside home: no 2nd mount
 
 
 def test_container_rung_is_opt_out(monkeypatch, tmp_path):

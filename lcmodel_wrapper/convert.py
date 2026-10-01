@@ -18,12 +18,11 @@
 
 import json
 import os
-import re
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional
 
 import numpy as np
 
-from .io import read_jmrui_txt, jmrui_metadata
+from .io import read_jmrui_txt, jmrui_metadata, read_raw
 
 
 #*******************#
@@ -166,28 +165,6 @@ def _read_fsl_folder(folder: str) -> ParsedBasis:
 #*************************#
 #   LCModel .RAW folder   #
 #*************************#
-_NUM_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eEdD][-+]?\d+)?")
-
-
-def _read_raw_file(path: str) -> Tuple[np.ndarray, Dict[str, str]]:
-    keys: Dict[str, str] = {}
-    values = []
-    with open(path, "r", errors="ignore") as fh:
-        for line in fh:
-            s = line.strip()
-            if not s or s.startswith("$"):
-                continue
-            if "=" in s:
-                key, _, val = s.partition("=")
-                keys[key.strip().upper()] = val.strip().rstrip(",").strip().strip("'")
-                continue
-            # FMTDAT may put several (real, imag) pairs on a line, e.g. '(8E13.5)'
-            nums = _NUM_RE.findall(s.replace("D", "E").replace("d", "e"))
-            values.extend(float(v) for v in nums)
-    values = np.asarray(values[:len(values) // 2 * 2], dtype=np.float64)
-    return values[0::2] + 1j * values[1::2], keys
-
-
 def _read_raw_folder(folder: str) -> ParsedBasis:
     files = sorted(
         f for f in os.listdir(folder) if f.lower().endswith((".raw", ".basis_raw"))
@@ -198,7 +175,7 @@ def _read_raw_folder(folder: str) -> ParsedBasis:
     names, fids = [], []
     dwell = central = echot = None
     for f in files:
-        fid, keys = _read_raw_file(os.path.join(folder, f))
+        fid, keys = read_raw(os.path.join(folder, f))
         if fid.size == 0:
             continue
         names.append(keys.get("METABO") or keys.get("ID") or os.path.splitext(f)[0])

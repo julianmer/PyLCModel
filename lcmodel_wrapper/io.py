@@ -15,8 +15,9 @@
 ####################################################################################################
 
 import json
+import re
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -253,7 +254,9 @@ def load_signals(data, domain: str = "time", dwell: Optional[float] = None,
         elif lower.endswith(".txt"):
             sig = read_jmrui(data)
         elif lower.endswith((".raw", ".h2o")):
-            sig = Signals(fids=from_raw(data)[np.newaxis, :])
+            # .RAW stores the orientation LCModel reads, the conjugate of everything else
+            # loaded here - which "conj" (on by default) turns back
+            sig = Signals(fids=np.conj(from_raw(data))[np.newaxis, :])
         else:
             raise ValueError(f"Unsupported file type: {data}")
     elif isinstance(data, (list, tuple)) and data and all(
@@ -287,15 +290,36 @@ def to_raw(fid, file_path, header=RAW_HEADER):
             fh.write(f"  {num.real: .6E} {num.imag: .6E}\n")
 
 
+def read_raw(path) -> Tuple[np.ndarray, Dict[str, str]]:
+    """Read a ".RAW" file -> (complex points as stored, keys of its "key = value" lines).
+
+    The samples follow the last namelist end ("$END", "&END" or a lone "/"), which may
+    close a line of header values, and run on as FMTDAT says - often several (real, imag)
+    pairs per line. They are LCModel's orientation, the conjugate of what "load_signals"
+    hands out for a ".RAW".
+    """
+    with open(path, "r", errors="ignore") as fh:
+        lines = fh.read().splitlines()
+    ends = [i for i, line in enumerate(lines)
+            if re.search(r"[$&]END\b", line, re.IGNORECASE) or line.strip() == "/"]
+    start = ends[-1] + 1 if ends else 0
+
+    keys: Dict[str, str] = {}
+    for line in lines[:start]:
+        s = line.strip()
+        if "=" in s and not s.startswith(("$", "&")):
+            key, _, val = s.partition("=")
+            keys[key.strip().upper()] = val.strip().rstrip(",").strip().strip("'")
+
+    values = [float(v.replace("D", "E").replace("d", "e"))
+              for line in lines[start:] for v in line.split()]
+    if len(values) % 2:
+        raise ValueError(f"{path}: {len(values)} values after the header, not (real, imag) pairs")
+    values = np.asarray(values, dtype=np.float64)
+    return values[0::2] + 1j * values[1::2], keys
+
+
 def from_raw(path) -> np.ndarray:
-    """Read the complex points that follow the "$END" of the header namelist."""
-    fid = []
-    in_data = False
-    with open(path, "r") as fh:
-        for line in fh:
-            parts = line.split()
-            if not in_data:
-                in_data = parts[:1] == ["$END"]
-            elif len(parts) >= 2:
-                fid.append(complex(float(parts[0]), float(parts[1])))
-    return np.array(fid)
+    """Read the complex points of a ".RAW" file as stored - LCModel's orientation, the
+    conjugate of what "load_signals" hands out for it (see "read_raw")."""
+    return read_raw(path)[0]
