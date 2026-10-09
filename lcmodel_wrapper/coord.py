@@ -35,6 +35,12 @@ _SERIES_END = re.compile(r"lines in following|^[ ]+[a-zA-Z0-9]+[ ]+Conc\. = [-+.
 #*****************************#
 #   load LCModel coord data   #
 #*****************************#
+def _number(text):
+    """A number as LCModel prints it; Fortran prints one that does not fit its field as
+    stars ('****'), which is no value."""
+    return float("nan") if set(text) <= {"*"} else float(text)
+
+
 def read_coord(path, coord=True, meta=True):
     """Read an LCModel ".coord" file.
 
@@ -66,8 +72,8 @@ def read_coord(path, coord=True, meta=True):
                 misc_rows -= 1
                 values = line.split()
                 if "FWHM" in values:
-                    fwhm = float(values[2])
-                    snr = float(values[-1].split("=")[-1])
+                    fwhm = _number(values[2])
+                    snr = _number(values[-1].split("=")[-1])
                 elif "shift" in values:
                     # a negative shift fuses with the "=": "shift =-0.012 ppm"
                     shift = float(values[2][1:]) if values[3] == "ppm" else float(values[3])

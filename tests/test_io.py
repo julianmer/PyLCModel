@@ -70,3 +70,18 @@ def test_a_raw_loads_like_the_same_spectrum_in_jmrui_text():
     raw = io.load_signals(str(_CHALLENGE / "datasets_LCModel" / "dataset1.RAW"))
     assert raw.fids.shape == (1, 2048)
     assert np.allclose(jmrui.fids, raw.fids, rtol=1e-4, atol=1e-3)
+
+
+def test_a_value_lcmodel_could_not_print_is_missing_not_a_crash(tmp_path):
+    """Fortran prints a number too wide for its field as stars; LCModel does so for S/N."""
+    from lcmodel_wrapper.coord import read_coord
+    coord = tmp_path / "x.coord"
+    coord.write_text(
+        " 2 lines in following concentration table:\n"
+        "  Conc.  %SD   /Cr+PCr   Metabolite\n"
+        "  8.330   3%   1.397   NAA\n"
+        " 2 lines in following misc. output table:\n"
+        " FWHM = 0.024 ppm    S/N = ****\n"
+        " Data shift = -0.012 ppm\n")
+    metabs, concs, crlbs, tcr, fwhm, snr, shift, phase = read_coord(str(coord), meta=True)
+    assert metabs == ["NAA"] and fwhm == 0.024 and snr != snr   # NaN
