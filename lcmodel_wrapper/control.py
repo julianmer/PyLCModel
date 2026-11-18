@@ -13,32 +13,39 @@
 ####################################################################################################
 
 import os
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
-DEFAULT_IGNORE = ["Lip13a", "Lip13b", "Lip09", "Lip20",
-                  "MM09", "MM12", "MM14", "MM17", "MM20",
-                  "-CrCH2", "CrCH2"]
+# the lipids, macromolecules and creatine CH2 correction LCModel simulates and adds to
+# every basis set unless told otherwise (manual, Sec 11.7)
+SIMULATED = ["Lip13a", "Lip13b", "Lip09", "Lip20",
+             "MM09", "MM12", "MM14", "MM17", "MM20",
+             "-CrCH2", "CrCH2"]
 
 
 #********************#
 #   ignore presets   #
 #********************#
-def resolve_ignore(ignore) -> List[str]:
+def resolve_ignore(ignore) -> Optional[List[str]]:
+    """None leaves the omitted metabolites to LCModel, or to the control file given."""
+    if ignore is None:
+        return None
     if isinstance(ignore, str):
-        if ignore.lower() == "default":
-            return list(DEFAULT_IGNORE)
+        if ignore.lower() == "simulated":
+            return list(SIMULATED)
         if ignore.lower() == "none":
             return []
         raise ValueError(
-            "Unknown ignore preset. Use 'default', 'none', or a list of metabolite names."
+            "Unknown ignore preset. Use 'simulated', 'none', or a list of metabolite names."
         )
     if isinstance(ignore, (list, tuple)):
         return list(ignore)
     raise ValueError("ignore must be a list of metabolite names or a preset string.")
 
 
-def _omit_lines(ignore: List[str]) -> List[str]:
+def _omit_lines(ignore: Optional[List[str]]) -> List[str]:
+    if ignore is None:
+        return []
     return [f"nomit={len(ignore)}"] + [f"chomit({i + 1})='{m}'" for i, m in enumerate(ignore)]
 
 
@@ -46,7 +53,7 @@ def _omit_lines(ignore: List[str]) -> List[str]:
 #   build a control set   #
 #*************************#
 def build_control(path2basis: str, n_points: int, bandwidth: float, central_freq: float,
-                  ppmlim: Tuple[float, float] = (0.5, 4.2), ignore=DEFAULT_IGNORE,
+                  ppmlim: Tuple[float, float] = (0.5, 4.2), ignore=None,
                   dows: bool = False) -> List[str]:
     """Create a default LCModel control file as a list of lines."""
     return [
@@ -74,12 +81,13 @@ def build_control(path2basis: str, n_points: int, bandwidth: float, central_freq
 #   load + override file   #
 #**************************#
 def load_control(control_path: str, path2basis: str, ppmlim: Tuple[float, float],
-                 ignore=DEFAULT_IGNORE) -> List[str]:
-    """Read an existing control file and override basis, ppm limits and ignored metabolites."""
+                 ignore=None) -> List[str]:
+    """Read an existing control file and override basis, ppm limits and, when given,
+    ignored metabolites."""
     ignore = resolve_ignore(ignore)
     with open(control_path, "r") as fh:
         control = [line for line in fh.read().splitlines()
-                   if not line.startswith(("chomit(", "nomit="))]
+                   if ignore is None or not line.startswith(("chomit(", "nomit="))]
 
     set_key(control, "filbas", f"'{os.path.abspath(path2basis)}'")
     set_key(control, "ppmst", ppmlim[1])

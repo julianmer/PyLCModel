@@ -76,8 +76,10 @@ class PyLCModel:
         Analysis window (ppmend, ppmst).
     conj : bool
         Conjugate the FIDs before fitting (convention dependent).
-    ignore : str | list
-        "default", "none" or a list of metabolite names to omit.
+    ignore : str | list, optional
+        Metabolites to omit: a list of names, "none", or "simulated" for LCModel's
+        simulated lipids, macromolecules and creatine CH2 correction. By default
+        (None) LCModel's own choice, or the control file's.
     save_path : str, optional
         Directory to keep intermediate files (otherwise a temporary one is used).
     path2exec : str, optional
@@ -112,7 +114,7 @@ class PyLCModel:
     """
 
     def __init__(self, path2basis, control=None, multiprocessing=False, ppmlim=(0.5, 4.2),
-                 conj=True, ignore="default", save_path="", path2exec=None,
+                 conj=True, ignore=None, save_path="", path2exec=None,
                  domain="time", sample_points=None, bandwidth=None, central_freq=None,
                  allow_download=True, allow_docker=True, allow_build=True,
                  convert_basis=False, basis_format=None, timeout=900, io_timeout=10,

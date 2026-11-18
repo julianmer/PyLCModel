@@ -60,7 +60,8 @@ def challenge_mae(test_size: int = 5) -> float:
     basis = _CHALLENGE / "basisset_LCModel" / "press3T_30ms.BASIS"
     data_dir = _CHALLENGE / "datasets_JMRUI"
 
-    lcm = PyLCModel(path2basis=str(basis), sample_points=2048, domain="time")
+    lcm = PyLCModel(path2basis=str(basis), sample_points=2048, domain="time",
+                    ignore="simulated")
     n_metabs = lcm.basis.n_metabs
 
     # pair ground truths with challenge datasets by dataset number
